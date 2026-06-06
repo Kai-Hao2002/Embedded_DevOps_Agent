@@ -1,0 +1,72 @@
+﻿Test ID,Level,Topic,Question,AI Answer,Time (s)
+1,1 (Basic),Memory Map,What is the base address of the GPIO1 module?,"Based on the provided context, the base address of the GPIO1 module is not explicitly stated. The context mentions that ""GPIO1 is in AONMIX"" but does not provide its memory map base address.",5.2
+2,1 (Basic),Registers,"In the LPUART module, what is the register offset for the Watermark Register (WATER)?","Based on the provided context, the register offset for the Watermark Register (WATER) in the LPUART module is not mentioned.",2.76
+3,1 (Basic),Core,"Does the Cortex-M33 core support TCM (Tightly Coupled Memory)? If so, what is its primary purpose?","Yes, the Cortex-M33 core supports Tightly Coupled Memory (TCM).
+
+Its primary purpose is to:
+*   Facilitate **fast power-on wake-up** through **Execution In Place (XIP)**.
+*   Store the Cortex-M33 firmware image during the boot process, especially in **low power boot mode**, where the Cortex-A55 ROM places the M33 firmware into the Shared RAM (Cortex-M33 TCM) before kicking off the M33 core.
+
+By default, the TCM is configured as 256 KB, split into:
+*   128 KB system TCM on the system bus.
+*   128 KB code TCM on the code bus.
+
+This configuration can be changed using the `BLK_CTRL_S_AONMIX.M33_CFG[TCM_SIZE]` register field.",4.19
+4,2 (Cross-Para),Boot,Please list the primary boot devices supported by the i.MX 93 ROM.,"The i.MX 93 ROM supports the following primary boot devices for both Cortex-A55 ROM (single boot) and Cortex-M33 ROM (Low Power Boot):
+
+*   eMMC on USDHC1
+*   SD on USDHC1/2
+*   FlexSPI NAND on FlexSPI1
+*   FlexSPI NOR on FlexSPI1",4.0
+5,2 (Cross-Para),GPIO,"To configure a pad as a GPIO output, which specific register inside the IOMUXC needs to be modified, and what should be written to the GPIO Direction Register (GDIR)?","To configure a pad as a GPIO output:
+
+1.  **IOMUXC Configuration:**
+    *   The specific register inside the IOMUXC that needs to be modified is the **Software Mux Control Register** for the desired pad, named `SW_MUX_CTL_PAD_<PAD NAME>`.
+    *   Within this register, the `MUX_MODE` field (bits 2-0) should be set to `000` (ALT0) to select the GPIO function for that pad.
+        *   For example, for `GPIO_IO27`, you would modify `SW_MUX_CTL_PAD_GPIO_IO27` and set `MUX_MODE` to `000` to select `ALT0 mux port: GPIO2_IO27`.
+        *   Similarly, for `GPIO_IO04`, you would modify `SW_MUX_CTL_PAD_GPIO_IO04` and set `MUX_MODE` to `000` to select `ALT0 mux port: GPIO2_IO04`.
+
+2.  **GPIO Direction Register (PDDR) Configuration:**
+    *   The GPIO Direction Register (referred to as Port Data Direction or PDDR in the context) needs to have the corresponding bit for the specific pin set to **1**.
+    *   According to Table 134, ""A pin is configured for the GPIO function and the corresponding PDDR field is 1"" means ""The pin is configured as an output"".",5.72
+6,2 (Cross-Para),Power,"What are the different power modes available in the i.MX 93, and which module is primarily responsible for controlling system resets (SRC)?","The i.MX 93 offers the following power modes:
+
+*   **BBSM (RTC mode):** In this mode, only the power for the BBSM domain remains on to keep the RTC and BBSM logic alive.
+*   **OFF:** All power rails are turned OFF in this mode.
+*   **IDLE:** This is a low power mode where certain modules are ON as needed, while others like ARM A55 CPUs and ARM_PLL are OFF.
+*   **SUSPEND:** This is another low power mode, more aggressive than IDLE, where most modules, including ARM A55 CPUs, Shared L3 Cache, DISPLAY, DRAM Controller & PHY, ARM_PLL, DRAM_PLL, SYSTEM_PLL1, and module clocks, are OFF.
+
+The **System Reset Controller (SRC)** is primarily responsible for controlling system resets. This module generates the reset signals to all the modules in the SoC and appropriately asserts reset signals for power transitions, entry, and exit. Its memory map is provided as `44460000 - 4446FFFF` (or `54460000 - 5446FFFF`).",19.46
+7,3 (Advanced),Debugging,"I am trying to use LPI2C1 to communicate with a sensor, but there is no signal on the pins. As a firmware engineer, what steps should I check regarding the Clock (CCM) and Pin Mux (IOMUXC) configurations based on the manual?","Based on the provided context, here are the steps you should check regarding Pin Mux (IOMUXC) configurations for LPI2C1. The context does not provide specific details for LPI2C1's clock (CCM) configuration.
+
+**1. Pin Mux (IOMUXC) Configuration:**
+
+*   **Identify the correct MUX_MODE:** For LPI2C communication, the SDA and SCL pins must be configured to their respective LPI2C function. The context provides an example for `LPI2C2_SDA` where `MUX_MODE` `000` selects `ALT0 mux port: LPI2C2_SDA`.
+    *   You would need to find the `SW_MUX_CTL_PAD` registers corresponding to the physical pins used for LPI2C1_SDA and LPI2C1_SCL.
+    *   For each of these pins, you must set the `MUX_MODE` field to the value that selects the LPI2C1 functionality (e.g., `000` for `ALT0` if LPI2C1 is the primary alternate function).
+*   **SION Field:** Ensure the `SION` (Software Input On Field) bit is configured correctly if an input path is required regardless of the MUX_MODE functionality. Typically, for standard peripheral operation, this might be `0` (Input Path is determined by functionality), but it's good to be aware of its purpose.
+*   **Open-drain support:** The LPI2C controller defaults to open-drain configuration of the SDA and SCL pins. This is a default electrical characteristic and doesn't require explicit configuration in the IOMUXC for basic functionality, but it's important to remember for external pull-up resistor requirements.
+
+**Missing Information in Context:**
+
+*   The provided context **does not include the specific `SW_MUX_CTL_PAD` register names or their offsets for LPI2C1_SDA and LPI2C1_SCL**. You would need to consult the full i.MX93 Reference Manual to find these precise register addresses and the corresponding `MUX_MODE` values for LPI2C1.
+*   The context **does not provide any specific steps or registers for configuring the LPI2C1 clock within the Clock Control Module (CCM)**. While it shows general `CCM_CLKO` muxing, it lacks details on enabling or setting the clock source/divider for the LPI2C peripheral itself.
+
+Therefore, based *only* on the provided context, I can tell you to look for the `SW_MUX_CTL_PAD` registers for LPI2C1_SDA and LPI2C1_SCL and set their `MUX_MODE` fields appropriately, similar to the `LPI2C2_SDA` example. However, I cannot provide the exact register addresses or CCM configuration steps.",72.78
+8,3 (Advanced),Arch,"According to the reference manual, what is the main division of tasks between the Cortex-A55 and the Cortex-M33 in the i.MX 93 architecture?","Based on the reference manual, the main division of tasks between the Cortex-A55 and Cortex-M33 in the i.MX 93 architecture is as follows:
+
+*   **Cortex-A55's Primary Role:**
+    *   In **Single Boot** mode, the Cortex-A55 ROM is the primary bootloader. It loads all containers and images, including the Cortex-M33 firmware image, placing it in the Shared RAM (Cortex-M33 TCM).
+    *   It is responsible for ""kicking off"" the Cortex-M33:
+        *   Sets the SCR bit to release the Cortex-M33 reset.
+        *   Loads and verifies the Cortex-M33 image.
+        *   Sends a request to EdgeLock secure enclave to release the Cortex-M33 TROUT.
+        *   Releases the Cortex-M33 CPUWAIT signal (See BLK_CTRL_S_AONMIX[M33_CFG] register).
+    *   The Cortex-A55 ROM uses WDOG3 and the Generic Timer.
+
+*   **Cortex-M33's Primary Role:**
+    *   In **Low Power Boot** mode, only the Cortex-M33 core runs after Power-On Reset (POR). The Cortex-A55 core cannot be triggered by Cortex-M33 firmware in this mode.
+    *   Supports Execution In Place (XIP) to facilitate fast power-on wake-up.
+    *   The Cortex-M33 ROM uses WDOG1 and the System Counter.
+    *   It has a low gate count and high energy efficiency, making it suitable for real-time and low-power operations.
+    *   Handles specific exceptions (SVC, NMI, Others) in its ROM.",73.48

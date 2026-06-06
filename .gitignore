@@ -1,0 +1,31 @@
+# 1. Python Environment & Cache
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 2. Environment Variables (CRITICAL: Never commit this!)
+.env
+
+# 3. Vector Database (Local Data)
+chroma_db/
+splits.pkl
+.DS_Store
+
+# 4. IDE Specific Files
+.vscode/
+.idea/
+
+# 5. Build Logs & Outputs (Task 1 & Task 2)
+*.log
+build_log.txt
+*.axf
+*.map
+*.hex
+*.bin
+
+# 原始 PDF 文件 (視公司規定，通常不把大檔傳上 Git)
+docs/*.pdf
+docs/processed/*.pdf
