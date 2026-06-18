@@ -36,8 +36,8 @@ if __name__ == "__main__":
 
     # 這裡可以改成固定輸出 LOG_ERROR 來測試 AI 抓蟲功能
     # 預設為隨機抽取一種情境
-    #outcome = random.choice([LOG_SUCCESS, LOG_ERROR, LOG_WARNING])
-    outcome = LOG_ERROR
+    outcome = random.choice([LOG_SUCCESS, LOG_ERROR, LOG_WARNING])
+    #outcome = LOG_ERROR
 
     # 寫入假 Log 檔
     with open(out_file, "w", encoding="utf-8") as f:

@@ -1,5 +1,11 @@
 import serial
 import time
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DEFAULT_BAUDRATE = int(os.getenv("TARGET_BAUDRATE", 115200))
 
 def monitor_uart_log(port_name: str, duration: int = 5):
     """
@@ -12,8 +18,8 @@ def monitor_uart_log(port_name: str, duration: int = 5):
     error_detected = False
     
     try:
-        # 設定序列埠 (Mac 的 PTY 不需要特別設定 baudrate，但在真實硬體通常是 115200)
-        ser = serial.Serial(port_name, 115200, timeout=1)
+        # 使用環境變數定義的 baudrate / Use baudrate defined by env variables
+        ser = serial.Serial(port_name, DEFAULT_BAUDRATE, timeout=1)
         
         end_time = time.time() + duration
         while time.time() < end_time:

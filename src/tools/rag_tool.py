@@ -18,13 +18,13 @@ embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 if os.path.exists(DB_PATH) and os.path.exists(SPLITS_PATH):
     # 載入語意檢索器
     vectorstore = Chroma(persist_directory=DB_PATH, embedding_function=embeddings)
-    chroma_retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+    chroma_retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
     
     # 載入關鍵字檢索器
     with open(SPLITS_PATH, "rb") as f:
         splits = pickle.load(f)
     bm25_retriever = BM25Retriever.from_documents(splits)
-    bm25_retriever.k = 5
+    bm25_retriever.k = 10
     
     # 融合為 Ensemble Retriever
     ensemble_retriever = EnsembleRetriever(
@@ -51,6 +51,11 @@ def query_nxp_knowledge_base(query: str) -> str:
     
     print(f"🔍 [Knowledge Expert 正在翻閱手冊]: '{query}' ...")
     
+    enhanced_query = query
+    if "base address" in query.lower() or "start address" in query.lower():
+        enhanced_query += " (focus on memory map and system memory layout)"
+        print(f"🪄 [System] 偵測到位址查詢，已自動擴充查詢詞：{enhanced_query}")
+        
     # 執行檢索
     docs = ensemble_retriever.invoke(query)
     

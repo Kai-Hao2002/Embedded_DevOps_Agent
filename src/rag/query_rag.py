@@ -88,7 +88,7 @@ def start_query_engine():
             print(f"\n🤖 Gemini: \n{response['answer']}")
             
             # (Optional) 可以在這裡保留 Debug 功能來檢查來源
-            # print("\n🔍 [Sources]:", [doc.metadata.get("source") for doc in response["context"]])
+            print("\n🔍 [Sources]:", [doc.metadata.get("source") for doc in response["context"]])
         except Exception as e:
             print(f"\n❌ Error during execution: {e}")
 
