@@ -24,6 +24,7 @@ from tools.run_yocto_tool import trigger_remote_build, check_build_status, flash
 from tools.serial_monitor_tool import monitor_uart_log
 # 假設你已經有 retriever 或將 RAG 封裝成 tool
 from tools.rag_tool import query_nxp_knowledge_base 
+from tools.patch_tool import apply_patch_tool
 
 # ==========================================
 # 工具封裝區 (Tool Wrapper Section)
@@ -154,7 +155,7 @@ llm = get_llm(provider="gemini")
 # llm = get_llm(provider="claude")
 
 # 建立具備專屬工具權限的底層 React Agent
-knowledge_agent = create_react_agent(llm, tools=[query_nxp_knowledge_base])
+knowledge_agent = create_react_agent(llm, tools=[query_nxp_knowledge_base, apply_patch_tool])
 devops_agent = create_react_agent(llm, tools=[compile_and_flash_mcu, start_mpu_build, check_mpu_build_status, deploy_mpu_image])
 qa_agent = create_react_agent(llm, tools=[monitor_device_logs])
 zeroshot_agent = create_react_agent(llm, tools=[]) # B1 專用：完全無工具
@@ -169,17 +170,16 @@ def supervisor_node(state: AgentState):
     if current_mode == "B1":
         return {"next_node": "ZeroShot_Expert"}
         
-    system_prompt = f"""你是一位嵌入式系統專案主管。目前系統運行在實驗對照組模式：[{current_mode}]。
-    
-    請遵循以下模式邊界進行決策：
-    - B2 模式 (LLM+RAG 靜態輸出): 你只能指派 Knowledge_Expert 來提供手冊規範。你『絕對禁止』指派 DevOps_Expert 或 QA_Expert。
-    - B3 模式 (MAS+編譯反饋): 你可以指派 DevOps_Expert 執行編譯，並可指派 Knowledge_Expert 查閱手冊。你『絕對禁止』指派 QA_Expert 監聽序列埠。
-    - PROPOSED_MAS (完整架構): 允許完整管線。
-      1. 若需編譯與部署 -> 指派 DevOps_Expert
-      2. 若需序列埠監聽 -> 指派 QA_Expert
-      3. 若需錯誤分析與手冊查閱 -> 指派 Knowledge_Expert
-      4. 🚨【重要】：如果使用者要求「生成測試計畫 (Test Plan)」，你『必須』指派 QA_Expert，因為只有 QA 專家具備自動化腳本的結構化輸出能力。
-    """
+    system_prompt = f"""你是一位嵌入式系統專案主管。目前運行模式：[{current_mode}]。
+        
+        請遵循以下決策邏輯：
+        1. 若需編譯與部署 -> 指派 DevOps_Expert
+        2. 若需監聽序列埠 -> 指派 QA_Expert
+        3. 若遇見錯誤 (編譯錯誤或 Kernel Panic) -> 指派 Knowledge_Expert 查閱手冊並產生 Patch 修復。
+        4. 🚨【反饋迴圈】：如果上一步 Knowledge_Expert 回報「✅ 成功修復！已套用至...」，
+        你『必須』再次指派 DevOps_Expert 進行編譯，以驗證修復是否成功。
+        5. 只有當最終日誌顯示一切正常時，才選擇 FINISH。
+        """
     
     messages = [SystemMessage(content=system_prompt)] + state["messages"]
     router_llm = llm.with_structured_output(RouteDecision)
@@ -195,13 +195,13 @@ def zeroshot_node(state: AgentState):
     return {"messages": result["messages"][len(inputs):], "next_node": "FINISH"}
 
 def knowledge_node(state: AgentState):
-    """RAG 知識檢索節點"""
-    sys_msg = SystemMessage(content="""你是一位 NXP 手冊專家。
-    請專注呼叫 query_nxp_knowledge_base 工具檢索精確數據，直接回答結果，不要反問。
-    【重要技巧】：如果使用者需要知道「基底位址(Base Address)」與「暫存器偏移(Register Offset)」，請務必呼叫工具兩次：
-    第一次搜尋："LPI2C2 base address memory map"
-    第二次搜尋："LPI2C SRDR register offset"
-    不要試圖在一次搜尋中找齊所有資料。
+    """RAG 知識檢索與程式碼修復節點"""
+    sys_msg = SystemMessage(content="""你是一位 NXP 系統專家。
+    1. 使用 query_nxp_knowledge_base 檢索手冊。
+    2. 如果你確定了導致編譯錯誤的原因（例如缺少定義、寫錯位址），
+       🚨 **你必須呼叫 `apply_patch_tool` 來直接修改原始碼**。
+       提供精確的 `search_text` 與 `replace_text`。
+    3. 修改完成後，告知系統修復已套用。
     """)
     # ...
     baton = HumanMessage(content="[系統] 請查閱手冊庫，分析當前硬體配置或崩潰日誌。")

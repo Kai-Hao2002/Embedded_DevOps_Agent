@@ -30,4 +30,10 @@ build_log.txt
 docs/*.pdf
 docs/processed/*.pdf
 docs/*.png
+
+#test plan schema
 generated_tests/*.py
+
+#patch
+patches/*.patch
+src/*.c
