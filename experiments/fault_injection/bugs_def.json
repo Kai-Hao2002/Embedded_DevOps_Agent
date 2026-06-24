@@ -1,0 +1,13 @@
+[
+  {
+    "bug_id": "BUG_M33_002",
+    "category": "Hardware Limitation Error",
+    "description": "晶片不支援的 LPI2C 腳位模式 (Unsupported Pin Configuration)",
+    "target_file": "target_workspace/mcu_firmware/main.c",
+    "fault_action": "replace_text",
+    "fault_search": "masterConfig.pinConfig = kLPI2C_2PinOpenDrain;",
+    "target_content": "masterConfig.pinConfig = kLPI2C_4PinUnidirectional;",
+    "human_baseline_time_sec": 180,
+    "user_prompt": "請幫我編譯 MCU 專案。如果編譯失敗，請查閱 i.MX93 參考手冊，了解該晶片的 LPI2C 腳位模式限制，並修改原始碼 (目標檔案的相對路徑為 target_workspace/mcu_firmware/main.c)，直到編譯成功為止。"
+  }
+]

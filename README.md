@@ -63,6 +63,17 @@ Intern_AI_Agent/
  │       ├── ingest_data.py         # Parses PDFs/Web to build ChromaDB & BM25
  │       └── evaluate_rag.py        # Automated RAG accuracy evaluation
  │
+ ├── target_workspace/             # Target Embedded Projects
+ │   ├── mcu_firmware/             # Keil MDK project (.c, .h, .uvprojx)
+ │   └── mpu_linux_bsp/            # Yocto/Linux BSP project (.dts, .dtsi, recipes)
+ │
+ ├── experiments/                  # Evaluation & Datasets
+ │   ├── benchmark_retrieval/      # retrieval benchmark 
+ │   ├── fault_injection/          # fault injection dataset
+ │   │   ├── bugs_def.json         # bug definition
+ │   │   └── backup_clean_code/    # clean code backup
+ │   └── results/                  
+ │
  ├── patches/                       # Auto-generated .patch files for Git
  ├── flash_m33.jlink                # J-Link command script
  └── requirements.txt               # Dependencies

@@ -37,3 +37,9 @@ generated_tests/*.py
 #patch
 patches/*.patch
 src/*.c
+
+#experiments
+experiments/fault_injection/backup_clean_code
+
+#target_workspace
+target_workspace/

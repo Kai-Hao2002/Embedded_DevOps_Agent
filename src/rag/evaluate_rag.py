@@ -1,6 +1,7 @@
 import os
 import pickle
 import time
+import json
 import pandas as pd
 from dotenv import load_dotenv
 from langchain_chroma import Chroma
@@ -58,104 +59,87 @@ def setup_rag_chain():
     prompt = ChatPromptTemplate.from_messages([("system", system_prompt), ("human", "{input}")])
     question_answer_chain = create_stuff_documents_chain(llm, prompt)
     rag_chain = create_retrieval_chain(ensemble_retriever, question_answer_chain)
-    return rag_chain
+    return rag_chain, ensemble_retriever
 
-def run_evaluation():
-    """執行自動化測試並產生報告 (Run automated tests and generate report)"""
-    print("🚀 Initializing Auto-Evaluator...")
+def load_benchmark_dataset(json_path: str):
+    """載入測試考卷 / Load the exam dataset"""
+    with open(json_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+def calculate_mrr(retrieved_docs, expected_sources):
+    """
+    計算 MRR 指標。
+    比對檢索到的文件來源 (doc.metadata['source']) 是否存在於預期來源列表中。
+    
+    Calculate the MRR metric.
+    Compare if the retrieved document source exists in the expected sources list.
+    """
+    if not expected_sources:
+        return 0.0
+        
+    for rank, doc in enumerate(retrieved_docs, start=1):
+        actual_source = doc.metadata.get("source", "")
+        # 只要檢索到的來源名稱部分匹配預期清單中的任何一個，即視為命中
+        # As long as the retrieved source name partially matches any in the expected list, it's a hit.
+        for expected in expected_sources:
+            if expected in actual_source:
+                return 1.0 / rank
+                
+    return 0.0 # Top K 內皆未命中 / No hits in Top K
+
+def run_benchmark_evaluation():
+    print("🚀 Initializing Retrieval Benchmark Evaluator...")
     try:
-        rag_chain = setup_rag_chain()
+        rag_chain, ensemble_retriever = setup_rag_chain()
     except Exception as e:
         print(f"Initialization Error: {e}")
         return
 
-    # ==========================================
-    # 🧪 升級版測試題庫 (Upgraded Test Suite)
-    # 涵蓋 RM, EVK, Yocto, Porting Guide 與 Test Plan
-    # ==========================================
-    test_suite = [
-        {
-            "Level": "1 (Basic)", 
-            "Topic": "Board Physical (EVK)", 
-            "Question": "According to the i.MX 93 EVK Board User Manual, what is the I2C address of the PMIC (PCA9451A), and which I2C bus is it connected to?"
-        },
-        {
-            "Level": "1 (Basic)", 
-            "Topic": "MCU Memory Map (RM)", 
-            "Question": "What is the memory base address of the LPI2C2 module on the i.MX93?"
-        },
-        {
-            "Level": "2 (Cross-Doc)", 
-            "Topic": "Boot Configuration", 
-            "Question": "I want to boot the i.MX 93 EVK from the onboard eMMC. According to the board manual and reference manual, what should be the value of the BOOT_MODE[3:0] DIP switches?"
-        },
-        {
-            "Level": "2 (Yocto/Build)", 
-            "Topic": "Yocto Bitbake", 
-            "Question": "In the Yocto Project, which specific bitbake task is responsible for fetching the source code, and what 'devtool' command can I use to modify a recipe's source code interactively?"
-        },
-        {
-            "Level": "2 (System/Arch)", 
-            "Topic": "Dual-Core IPC", 
-            "Question": "How does the Cortex-A55 communicate with the Cortex-M33 in the i.MX93? Briefly explain the role of the Messaging Unit (MU)."
-        },
-        {
-            "Level": "3 (Advanced)", 
-            "Topic": "Linux Device Tree", 
-            "Question": "Based on the i.MX Porting Guide, what are the essential properties I need to define in a Device Tree (DTS) node to enable an I2C sensor device on the LPI2C bus?"
-        },
-        {
-            "Level": "3 (Advanced)", 
-            "Topic": "Test Plan Generation", 
-            "Question": "I need to write a test plan for the LPUART interface. According to the 'Unit Tests' chapter in the i.MX Linux Reference Manual, what is the standard method to test the UART loopback or basic transmit/receive functionality?"
-        },
-        {
-            "Level": "3 (Toolchain)", 
-            "Topic": "J-Link Debugging", 
-            "Question": "I am experiencing a HardFault on the Cortex-M33. Based on the J-Link Commander manual and EVK manual, which connector on the i.MX 93 EVK provides JTAG/SWD access, and what basic J-Link command can I use to halt the CPU and read a register?"
-        }
-    ]
+    benchmark_path = os.path.join(os.path.dirname(__file__), "benchmark_dataset.json")
+    if not os.path.exists(benchmark_path):
+        print(f"❌ 找不到基準測試檔 (Benchmark file not found): {benchmark_path}")
+        return
 
+    test_suite = load_benchmark_dataset(benchmark_path)
     results = []
-    print("\n🧪 Starting Tests...")
+    
+    print(f"\n🧪 開始執行 {len(test_suite)} 項基準測試... (Starting {len(test_suite)} benchmark tests...)")
     print("-" * 60)
 
-    for i, test in enumerate(test_suite, 1):
-        print(f"Running Test {i}/{len(test_suite)}: [{test['Topic']}]...")
-        start_time = time.time()
+    total_mrr = 0.0
+
+    for test in test_suite:
+        print(f"評估中 (Evaluating) [{test['bug_id']}] - {test['category']} ...")
         
-        try:
-            response = rag_chain.invoke({"input": test["Question"]})
-            answer = response["answer"]
-            time_taken = round(time.time() - start_time, 2)
-        except Exception as e:
-            answer = f"Error: {e}"
-            time_taken = 0.0
+        # 1. 僅觸發檢索器以計算 MRR (Trigger retriever only to calculate MRR)
+        retrieved_docs = ensemble_retriever.invoke(test["query"])
+        mrr_score = calculate_mrr(retrieved_docs, test["expected_sources"])
+        total_mrr += mrr_score
+
+        # 2. (選擇性) 觸發完整 RAG 鏈取得文字回答 (Optional: Trigger full RAG chain for text answer)
+        # response = rag_chain.invoke({"input": test["query"]})
+        # ai_answer = response["answer"]
 
         results.append({
-            "Test ID": i,
-            "Level": test["Level"],
-            "Topic": test["Topic"],
-            "Question": test["Question"],
-            "AI Answer": answer.strip(),
-            "Time (s)": time_taken
+            "Bug ID": test["bug_id"],
+            "Category": test["category"],
+            "MRR": round(mrr_score, 4),
+            "Expected Sources": ", ".join(test["expected_sources"])
         })
-        time.sleep(1) # 暫停 1 秒避免觸發 API 頻率限制 (Pause for 1 sec to avoid API rate limits)
+        time.sleep(1) # 避免 API 速率限制 / Avoid API rate limits
 
-    # 輸出成 Pandas DataFrame (Output as Pandas DataFrame)
-    import pandas as pd
+    # 產出報告 / Generate Report
     df = pd.DataFrame(results)
-    
-    # 儲存為 CSV 檔案 (Save to CSV)
-    csv_filename = "rag_evaluation_report_v2.csv"
+    csv_filename = "retrieval_benchmark_results.csv"
     df.to_csv(csv_filename, index=False, encoding="utf-8-sig")
     
-    print("\n✅ Evaluation Complete!")
-    print("-" * 60)
-    print(f"📁 Report saved to: {os.path.abspath(csv_filename)}")
+    average_mrr = total_mrr / len(test_suite) if test_suite else 0
     
-    # 在終端機印出簡化的表格結果 (Print simplified table in terminal)
-    print("\n📊 Summary Table:")
-    print(df[["Test ID", "Topic", "Time (s)", "AI Answer"]].to_string(max_colwidth=50))
+    print("\n✅ 評估完成！ (Evaluation Complete!)")
+    print(f"🏆 系統平均 MRR 倒數排名分數 (System Average MRR): {average_mrr:.4f}")
+    print(f"📁 詳細報告已儲存至 (Detailed report saved to): {os.path.abspath(csv_filename)}")
+    print("\n📊 測試結果摘要 (Summary):")
+    print(df[["Bug ID", "Category", "MRR"]].to_string(index=False))
+
 if __name__ == "__main__":
-    run_evaluation()
+    run_benchmark_evaluation()

@@ -1,0 +1,2 @@
+﻿Bug ID,Category,LLM Mode,Human Baseline (s),AI MTTR (s),Success (Pass@k),Final Node
+BUG_M33_002,Hardware Limitation Error,PROPOSED_MAS,180,234.73,1,Supervisor

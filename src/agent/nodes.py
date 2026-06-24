@@ -2,6 +2,7 @@
 import os
 import re
 import json
+import time
 import logging
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
@@ -17,13 +18,13 @@ from agent.agent_tools import (
 )
 # 引入 RAG 與 Patch 工具
 from tools.rag_tool import query_nxp_knowledge_base 
-from tools.patch_tool import apply_patch_tool
+from tools.patch_tool import apply_patch_tool, read_file_tool
 
 logger = logging.getLogger(__name__)
 
 # 初始化全域 LLM 與 Agent
 llm = get_llm(provider="gemini")
-knowledge_agent = create_react_agent(llm, tools=[query_nxp_knowledge_base, apply_patch_tool])
+knowledge_agent = create_react_agent(llm, tools=[query_nxp_knowledge_base, read_file_tool, apply_patch_tool])
 devops_agent = create_react_agent(llm, tools=[compile_and_flash_mcu, start_mpu_build, check_mpu_build_status, deploy_mpu_image])
 qa_agent = create_react_agent(llm, tools=[monitor_device_logs])
 #B1
@@ -57,12 +58,13 @@ def generate_structured_test_plan(hardware_context: str, user_request: str) -> T
     return chain.invoke({"context": hardware_context, "input": user_request})
 
 def supervisor_node(state: AgentState):
+    # 🎯 新增除錯訊息 1
+    print("\n[System] The Supervisor node is starting up and sending a routing request to the LLM. Please wait...") 
+    
     current_mode = state.get("mode", "PROPOSED_MAS")
     if current_mode == "B1":
-        logger.info("[Supervisor] Experimental mode B1 is activated, with forced guidance to ZeroShot_Expert")
         return {"next_node": "ZeroShot_Expert"}
     if current_mode == "B2":
-        logger.info("[Supervisor] Experimental mode B2 is activated, with forced guidance to SingleAgent_Expert")
         return {"next_node": "SingleAgent_Expert"}
         
     system_prompt = f"""You are an Embedded Systems Project Supervisor. Current execution mode: [{current_mode}].
@@ -78,6 +80,7 @@ def supervisor_node(state: AgentState):
     messages = [SystemMessage(content=system_prompt)] + state["messages"]
     router_llm = llm.with_structured_output(RouteDecision)
     decision = router_llm.invoke(messages)
+    print(f"   [System] Received LLM's reply! The task will now be assigned to: {decision.next_node}") 
     return {"next_node": decision.next_node}
 
 def zeroshot_node(state: AgentState):
@@ -93,15 +96,20 @@ def single_agent_node(state: AgentState):
     return {"messages": result["messages"][len(inputs):], "next_node": "FINISH"}
 
 def knowledge_node(state: AgentState):
+    start_think = time.time()
     sys_msg = SystemMessage(content="""You are an NXP Systems Expert.
     1. Use `query_nxp_knowledge_base` to retrieve hardware manuals.
-    2. If a code fix is required, you MUST call `apply_patch_tool` to modify the source code.
-    3. 🛑 [Circuit Breaker]: If the tool reports "File not found" or fails, DO NOT attempt to call the tool repeatedly. Instead, gracefully abort and output your recommended modifications directly in the chat.
+    2. 🚨 [CRITICAL]: Before fixing any code, you MUST use `read_file_tool` to read the exact current content of the broken file. Do NOT guess the code structure!
+    3. Use `apply_patch_tool` to modify the source code. Your `search_context` MUST be an exact copy-paste from the output of `read_file_tool`.
     """)
     baton = HumanMessage(content="[System] Please consult the knowledge base to analyze the hardware configuration or crash logs. Attempt to use the patch tool if code modification is needed; if it fails, output your suggestions directly.")
     inputs = [sys_msg] + state["messages"] + [baton]
     result = knowledge_agent.invoke({"messages": inputs})
-    return {"messages": result["messages"][len(inputs):]}
+    think_time = time.time() - start_think
+    return {
+        "messages": result["messages"][len(inputs):],
+        "llm_thinking_time": state.get("llm_thinking_time", 0) + think_time
+    }
 
 def devops_node(state: AgentState):
     sys_msg = SystemMessage(content="""You are responsible for executing build and deployment tools.
@@ -132,7 +140,12 @@ def qa_node(state: AgentState):
                     logger.info(f"[QA Expert] Successfully loaded physical circuit diagram: {img_path}")
                     img_base64 = get_image_base64(img_path)
                     vision_prompt = [
-                        SystemMessage(content="You are a Senior Hardware Engineer. Please analyze this screenshot of the i.MX93 EVK Power Tree (PWR TREE) and extract the exact model name of the main Power Management IC (PMIC) shown in the image."),
+                        SystemMessage(content="""You are a Hardware Vision Expert. 
+                                        Analyze the provided schematic. Extract:
+                                        1. The exact IC Part Number (e.g., PCA9451A)
+                                        2. The connected bus name (e.g., I2C2, UART1)
+                                        3. Any visible hardware configuration pins (e.g., BOOT_MODE, I2C address selection pins)
+                                        Output this strictly as structured text."""),
                         HumanMessage(content=[
                             {"type": "text", "text": "What is the PMIC chip model shown in this schematic?"},
                             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
