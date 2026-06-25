@@ -1,31 +1,37 @@
-# 🤖 AI-Driven Embedded DevOps Agent for NXP i.MX93
+# AI-Driven Embedded BSP Closed-Loop Repair Agent for NXP i.MX93
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Multi--Agent-orange)
 ![LLM](https://img.shields.io/badge/LLM-Claude%203.5%20%7C%20Gemini%201.5-green)
 ![NXP](https://img.shields.io/badge/Hardware-NXP%20i.MX93-lightgrey)
 
-This project implements a fully automated, Large Language Model (LLM) based Embedded DevOps system designed specifically for the NXP i.MX93 heterogeneous multi-core architecture (Cortex-A55 + Cortex-M33). 
+This project implements a Large Language Model (LLM) based embedded BSP repair framework for the NXP i.MX93 heterogeneous multi-core architecture (Cortex-A55 + Cortex-M33).
 
-By integrating **Retrieval-Augmented Generation (RAG)**, **Multimodal Vision**, and **LangGraph Multi-Agent Systems (MAS)**, the agent autonomously performs compiling, flashing, run-time crash monitoring, and hardware schematic analysis, achieving a closed-loop "Self-Healing" development workflow.
+The current research focus is a **multi-agent closed-loop repair workflow** for BSP build and runtime failures. The system repeatedly performs `AnalyzeFailure -> RetrieveKnowledge -> GeneratePatch -> ApplyPatch -> Build -> Deploy/MockDeploy -> ObserveRuntime -> StopOrRetry` under a bounded retry budget.
+
+Hybrid RAG, mock toolchains, and UART/mock-UART validation provide measurable evidence for Pass@k, Functional Pass Rate, MRR, MTTR, token cost, and tool invocation reliability. Multimodal schematic analysis and cross-model comparison are treated as extended evaluation paths, not requirements for the core thesis experiment.
 
 ---
 
 ## 🌟 Core Features
 
-1. **🧠 LangGraph Multi-Agent System (MAS)**
-   - A Supervisor agent dynamically routes tasks to specialized experts (`DevOps_Expert`, `QA_Expert`, `Knowledge_Expert`) with built-in Circuit Breaker logic for graceful degradation.
-2. **⚡ Automated Multi-Core Deployment**
-   - **MCU (Cortex-M33)**: Headless build via Keil MDK CLI and one-click flashing via SEGGER J-Link.
-   - **MPU (Cortex-A55)**: Automated Yocto Bitbake via SSH, SFTP image retrieval, and eMMC deployment via NXP UUU.
-3. **📚 Hybrid RAG Knowledge Base (Ensemble Retriever)**
-   - Combines Semantic Search (ChromaDB) and Keyword Search (BM25) across thousands of pages of NXP Reference Manuals, EVK User Guides, and Porting Guides.
-4. **👁️ Multimodal Schematic Analysis to Pytest**
-   - Utilizing Vision models to read physical circuit Schematics, identify PMIC/Sensor I2C addresses, cross-reference the RAG memory map, and automatically generate `pytest`-compatible validation scripts.
-5. **🐒 Chaos Engineering & Mock Environment**
-   - Built-in "Chaos Monkey" for local testing without physical hardware. Simulates random Kernel Panics, UART gibberish, and Yocto fetch network failures to train the AI's resilience.
-6. **📊 Enterprise Observability**
-   - Full integration with Python `logging` for persistent tracking and **LangSmith** for visual graph tracing and token cost monitoring.
+1. **LangGraph Multi-Agent Closed Loop**
+   - A Supervisor routes work to `Knowledge_Expert`, `DevOps_Expert`, and `QA_Expert` under a bounded Pass@k repair budget.
+2. **Ablation Baselines for the Thesis**
+   - `B1`: Zero-Shot LLM.
+   - `B2`: Single Agent + Text RAG.
+   - `B3`: Closed-Loop Single Agent.
+   - `PROPOSED_MAS`: Multi-Agent Closed-Loop Framework.
+3. **Hybrid RAG Knowledge Base**
+   - Combines semantic retrieval (ChromaDB) and keyword retrieval (BM25) for BSP manuals, source files, build logs, and project documentation.
+4. **Build, Deploy, and Runtime Feedback**
+   - MCU path: Keil MDK CLI and J-Link compatible mock/real tools.
+   - MPU path: Yocto BitBake and UUU compatible mock/real tools.
+   - Runtime path: UART or mock UART validation with expected signatures and crash dictionaries.
+5. **Reproducible BSP Repair Benchmark**
+   - Fault cases include raw error prompts, broken files, golden patch descriptions, retrieval mappings, expected UART regexes, and crash patterns.
+6. **Experiment Metrics**
+   - Reports Pass@k, Functional Pass Rate, MTTR, token efficiency, tool errors, agent steps, and agentic interaction overhead.
 
 ---
 
@@ -68,9 +74,9 @@ Intern_AI_Agent/
  │   └── mpu_linux_bsp/            # Yocto/Linux BSP project (.dts, .dtsi, recipes)
  │
  ├── experiments/                  # Evaluation & Datasets
- │   ├── benchmark_retrieval/      # retrieval benchmark 
- │   ├── fault_injection/          # fault injection dataset
- │   │   ├── bugs_def.json         # bug definition
+ │   ├── benchmark_retrieval/      # RQ2 retrieval benchmark
+ │   ├── fault_injection/          # closed-loop repair dataset
+ │   │   ├── bugs_def.json         # bug definitions, golden patches, UART signatures
  │   │   └── backup_clean_code/    # clean code backup
  │   └── results/                  
  │
@@ -84,6 +90,7 @@ Intern_AI_Agent/
 ### 1. Environment Setup
    ```bash
    python3.10 -m venv venv
+   conda deactivate
    # Windows: .\venv\Scripts\activate
    # macOS/Linux: source venv/bin/activate
 
@@ -144,15 +151,27 @@ Parse the NXP manuals and build the local vector database:
    ```
 **Example Prompts to try:**
 - "請幫我編譯 MCU 專案。如果成功，請幫我監聽序列埠 /dev/ttys000的開機日誌。如果不幸失敗，請告訴我原因。"  (Please compile the MCU project. If successful, please monitor the boot logs on serial port /dev/ttys001 (replace with actual port). If it fails, please tell me the reason.)
-- "請幫我看 docs/sensor_schematic.png 這張電源樹電路圖，找出上面的 PMIC 晶片型號。接著，請生成一份完整的測試計畫 (Test Plan)，驗證這個 PMIC 在 I2C 總線上的連線狀態是否正常。" (Please look at the power tree schematic docs/sensor_schematic.png and identify the PMIC chip model on it. Next, please generate a complete Test Plan to verify if this PMIC's connection on the I2C bus is functioning properly.)
+- "請根據 Yocto/DTS/Keil 錯誤日誌進行閉環修復，產生 patch，重新建置，並使用 UART 或 mock UART 驗證結果。"
 
-**Automated Testing (QA Automation)**
-When the QA_Expert agent generates test plans, they are automatically saved into the generated_tests/ directory following the standard pytest format.
+## Thesis Experiment Modes
 
-To run the generated hardware validation scripts and generate a report:
-``` bash
-pip install pytest pytest-html
-pytest generated_tests/ --html=report.html -v
+The experiment runner uses the modes defined in the revised thesis proposal:
+
+- `B1`: Zero-Shot LLM
+- `B2`: Single Agent + Text RAG
+- `B3`: Closed-Loop Single Agent
+- `PROPOSED_MAS`: Multi-Agent Closed-Loop Framework
+
+Run the closed-loop BSP repair benchmark:
+
+```bash
+python experiments/experiment_runner.py
+```
+
+Run the retrieval benchmark for RQ2:
+
+```bash
+python src/rag/evaluate_rag.py
 ```
 
 Developed as part of the NXP i.MX93 Embedded DevOps Automation Initiative.

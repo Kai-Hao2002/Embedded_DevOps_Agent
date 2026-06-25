@@ -29,15 +29,15 @@ from src.agent.ai_agent import mas_app
 def print_banner():
     """印出系統啟動橫幅/print banner"""
     print("=" * 65)
-    print("🚀 NXP i.MX93 Embedded DevOps Multi-Agent System (MAS)")
+    print("🚀 Embedded BSP Closed-Loop Repair Multi-Agent System")
     print(f"⚙️  執行模式 (Execution Mode): {os.getenv('EXECUTION_MODE', 'MOCK')}")
     print(f"📊 LangSmith 追蹤 (Tracking): {os.getenv('LANGCHAIN_TRACING_V2', 'false')}")
     print("=" * 65)
     print("可接受指令類型 (Supported Commands):")
-    print("  1. MCU 編譯與燒錄 (MCU compile and flash")
+    print("  1. MCU 編譯與燒錄 (MCU compile and flash)")
     print("  2. MPU 遠端 Yocto 建置 (MPU remote Yocto build)")
-    print("  3. 序列埠即時監聽與除錯 (Real-time monitoring and debugging of serial ports")
-    print("  4. 視覺電路圖分析與測試計畫生成 (Visual circuit diagram analysis and test plan generation)")
+    print("  3. 序列埠/Mock UART 閉環驗證 (UART or mock UART validation)")
+    print("  4. BSP 錯誤分析、RAG 檢索與 patch 修復 (BSP repair loop)")
     print("=" * 65)
 
 def main():
@@ -61,7 +61,18 @@ def main():
             initial_state = {
                 "messages": [HumanMessage(content=user_text)],
                 "mode": TEST_MODE,
-                "retry_count": 0
+                "next_node": "",
+                "current_stage": "AnalyzeFailure",
+                "iteration_count": 0,
+                "max_repair_iterations": 5,
+                "start_time": 0.0,
+                "tool_error_count": 0,
+                "llm_thinking_time": 0.0,
+                "tool_exec_time": 0.0,
+                "build_passed": False,
+                "functional_passed": False,
+                "expected_uart_regex": "",
+                "crash_patterns": ["Kernel panic", "HardFault", "Segmentation fault"]
             }
 
             for output in mas_app.stream(initial_state, {"recursion_limit": 20}):

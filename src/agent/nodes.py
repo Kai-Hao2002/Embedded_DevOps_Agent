@@ -28,11 +28,15 @@ llm = get_llm(provider="gemini")
 knowledge_agent = create_react_agent(llm, tools=[query_nxp_knowledge_base, read_file_tool, apply_patch_tool])
 devops_agent = create_react_agent(llm, tools=[compile_and_flash_mcu, start_mpu_build, check_mpu_build_status, deploy_mpu_image])
 qa_agent = create_react_agent(llm, tools=[monitor_device_logs])
-#B1
-zeroshot_agent = create_react_agent(llm, tools=[]) 
-#B2
-single_agent = create_react_agent(llm, tools=[
-    query_nxp_knowledge_base, apply_patch_tool,
+# B1: Zero-shot LLM, no tools.
+zeroshot_agent = create_react_agent(llm, tools=[])
+# B2: Single Agent + Text RAG, no build/deploy/runtime feedback.
+retrieval_only_agent = create_react_agent(llm, tools=[
+    query_nxp_knowledge_base, read_file_tool, apply_patch_tool,
+])
+# B3: Closed-loop single agent with all tools, but no specialist node separation.
+closed_loop_single_agent = create_react_agent(llm, tools=[
+    query_nxp_knowledge_base, read_file_tool, apply_patch_tool,
     compile_and_flash_mcu, start_mpu_build, check_mpu_build_status, deploy_mpu_image,
     monitor_device_logs
 ])
@@ -72,12 +76,17 @@ def supervisor_node(state: AgentState):
     
     current_mode = state.get("mode", "PROPOSED_MAS")
     iteration_count = state.get("iteration_count", 0) # 取得當前迭代次數 (Get current iteration count)
-    MAX_RETRIES = 5 # 定義最大嘗試修復次數 k (Define maximum repair attempts k)
+    MAX_RETRIES = state.get("max_repair_iterations", 5) # Define Pass@k bound.
+
+    if state.get("next_node") == "FINISH":
+        return {"next_node": "FINISH"}
     
     if current_mode == "B1":
         return {"next_node": "ZeroShot_Expert"}
     if current_mode == "B2":
-        return {"next_node": "SingleAgent_Expert"}
+        return {"next_node": "RetrievalOnly_Expert"}
+    if current_mode == "B3":
+        return {"next_node": "ClosedLoopSingleAgent_Expert"}
         
     # 強制邊界防呆機制 (Boundary Guardrail Mechanism)
     if iteration_count >= MAX_RETRIES:
@@ -86,16 +95,19 @@ def supervisor_node(state: AgentState):
         # 覆寫狀態並強制結束 (Overwrite state and force finish)
         return {"next_node": "FINISH", "messages": [warning_msg]}
         
-    system_prompt = f"""You are an Embedded Systems Project Supervisor. Current execution mode: [{current_mode}].
-        🌟 Current repair iteration: {iteration_count}/{MAX_RETRIES}.
+    system_prompt = f"""You are the Supervisor for a thesis-oriented multi-agent closed-loop BSP repair framework.
+        Current execution mode: [{current_mode}].
+        Current bounded repair iteration: {iteration_count}/{MAX_RETRIES}.
+
+        Core workflow:
+        AnalyzeFailure -> RetrieveKnowledge -> GeneratePatch -> ApplyPatch -> Build -> Deploy/MockDeploy -> ObserveRuntime -> StopOrRetry.
         
         Please follow this decision logic strictly:
-        1. For compilation and deployment tasks -> Route to `DevOps_Expert`.
-        2. For serial port monitoring, OR requests to analyze schematics and generate test plans -> Route to `QA_Expert`.
-        3. Upon encountering errors (e.g., build failures or Kernel Panics) -> Route to `Knowledge_Expert` to consult manuals and generate a patch.
-        4. 🚨 [Feedback Loop]: If `Knowledge_Expert` reports "Patch applied successfully", you MUST route back to `DevOps_Expert` to recompile and verify the fix.
-        5. 🛑 [Human Intervention]: If `Knowledge_Expert` requests human intervention (e.g., "file not found", "please modify manually"), the automated fixing limit has been reached. You MUST immediately select FINISH to end the task. NEVER continue routing to `DevOps_Expert` autonomously.
-        6. Select FINISH ONLY when the final logs show complete success, no human intervention is needed, and all user requests are fulfilled.
+        1. If the latest evidence is a build failure, runtime crash, or missing BSP context, route to `Knowledge_Expert`.
+        2. If a patch was applied or the user asks to build/deploy, route to `DevOps_Expert`.
+        3. If compilation/deployment succeeded and runtime validation is requested, route to `QA_Expert`.
+        4. If `QA_Expert` reports Kernel Panic, HardFault, timeout, missing expected UART signature, or any crash pattern, route back to `Knowledge_Expert`.
+        5. Select FINISH only when the latest evidence indicates build success and runtime success, or when human intervention is required.
         """
     messages = [SystemMessage(content=system_prompt)] + state["messages"]
     router_llm = llm.with_structured_output(RouteDecision)
@@ -110,19 +122,30 @@ def zeroshot_node(state: AgentState):
     return {"messages": result["messages"][len(inputs):], "next_node": "FINISH"}
 
 def single_agent_node(state: AgentState):
-    sys_msg = SystemMessage(content="You are an all-in-one embedded systems engineer. You have access to ALL tools including knowledge retrieval, code patching, compilation, and UART monitoring. Attempt to solve the user's issue sequentially by yourself.")
+    sys_msg = SystemMessage(content="You are a retrieval-only embedded BSP repair baseline (B2). You may use text RAG and patching tools, but you must not call build, deploy, flashing, or UART monitoring tools. Produce a patch or repair recommendation based only on retrieved text context.")
     inputs = [sys_msg] + state["messages"]
-    result = single_agent.invoke({"messages": inputs})
+    result = retrieval_only_agent.invoke({"messages": inputs})
+    return {"messages": result["messages"][len(inputs):], "next_node": "FINISH"}
+
+def closed_loop_single_agent_node(state: AgentState):
+    sys_msg = SystemMessage(content="""You are the closed-loop single-agent baseline (B3).
+    You have access to retrieval, patching, build/deploy, and UART monitoring tools.
+    Solve the issue sequentially by yourself, but do not rely on specialist multi-agent handoff.
+    Stop when the build and runtime evidence indicate success or when the bounded repair attempt is exhausted.""")
+    inputs = [sys_msg] + state["messages"]
+    result = closed_loop_single_agent.invoke({"messages": inputs})
     return {"messages": result["messages"][len(inputs):], "next_node": "FINISH"}
 
 def knowledge_node(state: AgentState):
     start_think = time.time()
-    sys_msg = SystemMessage(content="""You are an NXP Systems Expert.
-    1. Use `query_nxp_knowledge_base` to retrieve hardware manuals.
-    2. 🚨 [CRITICAL]: Before fixing any code, you MUST use `read_file_tool` to read the exact current content of the broken file. Do NOT guess the code structure!
-    3. Use `apply_patch_tool` to modify the source code. Your `search_context` MUST be an exact copy-paste from the output of `read_file_tool`.
+    sys_msg = SystemMessage(content="""You are the Knowledge Expert for an embedded BSP closed-loop repair system.
+    Your responsibilities correspond to AnalyzeFailure, RetrieveKnowledge, GeneratePatch, and ApplyPatch.
+    1. Use `query_nxp_knowledge_base` to retrieve BSP manuals, source-code context, build documentation, or hardware notes.
+    2. Before fixing code, use `read_file_tool` to read the exact current content of the broken file. Do not guess the code structure.
+    3. Use `apply_patch_tool` for C source files, Device Tree files, linker scripts, or build configuration files.
+    4. If evidence is insufficient or the target file is missing, clearly request human intervention instead of inventing a repair.
     """)
-    baton = HumanMessage(content="[System] Please consult the knowledge base to analyze the hardware configuration or crash logs. Attempt to use the patch tool if code modification is needed; if it fails, output your suggestions directly.")
+    baton = HumanMessage(content="[System] Analyze the latest build/runtime evidence, retrieve relevant BSP context, and apply a minimal patch if a repair is justified.")
     inputs = [sys_msg] + state["messages"] + [baton]
     result = knowledge_agent.invoke({"messages": inputs})
     think_time = time.time() - start_think
@@ -133,18 +156,26 @@ def knowledge_node(state: AgentState):
     return {
         "messages": result["messages"][len(inputs):],
         "llm_thinking_time": state.get("llm_thinking_time", 0) + think_time,
-        "iteration_count": current_iteration + 1  # 更新狀態中的計數器 (Update the counter in the state)
+        "iteration_count": current_iteration + 1,
+        "current_stage": "ApplyPatch",
     }
 
 def devops_node(state: AgentState):
-    sys_msg = SystemMessage(content="""You are responsible for executing build and deployment tools.
+    sys_msg = SystemMessage(content="""You are the DevOps Expert for the Build and Deploy/MockDeploy stages.
     For MCU tasks: Directly call `compile_and_flash_mcu`.
     For MPU tasks: Call `start_mpu_build` -> `check_mpu_build_status` -> `deploy_mpu_image` sequentially.
     """)
     baton = HumanMessage(content="[System] It is the DevOps Expert's turn. Please immediately trigger the build/deployment tools.")
     inputs = [sys_msg] + state["messages"] + [baton]
     result = devops_agent.invoke({"messages": inputs})
-    return {"messages": result["messages"][len(inputs):]}
+    new_messages = result["messages"][len(inputs):]
+    joined = "\n".join(getattr(msg, "content", "") for msg in new_messages)
+    build_passed = "success" in joined.lower() or "成功" in joined
+    return {
+        "messages": new_messages,
+        "current_stage": "DeployOrMockDeploy" if build_passed else "Build",
+        "build_passed": build_passed,
+    }
 
 def qa_node(state: AgentState):
     current_mode = state.get("mode", "PROPOSED_MAS")
@@ -227,7 +258,15 @@ def qa_node(state: AgentState):
         report_msg = f"📊 [Test Plan Generated]\nSuccessfully generated {len(saved_files)} test scripts and saved them in the `generated_tests` directory:\n{', '.join(saved_files)}"
         return {"messages": [AIMessage(content=report_msg)], "next_node": "FINISH"}
     else:
-        sys_msg = SystemMessage(content="You are responsible for serial port monitoring. Please immediately call the `monitor_device_logs` tool using the default port.")
+        sys_msg = SystemMessage(content="""You are the QA Expert for the ObserveRuntime stage.
+        Monitor UART or mock UART logs, report whether expected success signatures appear, and flag crash patterns such as Kernel Panic, HardFault, timeout, or peripheral initialization failure.""")
         inputs = [sys_msg] + state["messages"]
         result = qa_agent.invoke({"messages": inputs})
-        return {"messages": result["messages"][len(inputs):]}
+        new_messages = result["messages"][len(inputs):]
+        joined = "\n".join(getattr(msg, "content", "") for msg in new_messages)
+        functional_passed = "operating normally" in joined.lower() or "正常" in joined or "✅" in joined
+        return {
+            "messages": new_messages,
+            "current_stage": "ObserveRuntime",
+            "functional_passed": functional_passed,
+        }

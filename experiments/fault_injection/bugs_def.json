@@ -1,33 +1,115 @@
 [
   {
-    "bug_id": "BUG_M33_002",
-    "category": "Hardware Limitation Error",
-    "description": "晶片不支援的 LPI2C 腳位模式 (Unsupported Pin Configuration)",
+    "bug_id": "BUG_COMPILE_001",
+    "category": "Syntax and Compile Errors",
+    "toolchain": "Keil MDK",
+    "target": "Cortex-M33",
+    "description": "Unsupported LPI2C pin configuration on i.MX93 M33 firmware.",
     "target_file": "target_workspace/mcu_firmware/main.c",
     "fault_action": "replace_text",
     "fault_search": "masterConfig.pinConfig = kLPI2C_2PinOpenDrain;",
     "target_content": "masterConfig.pinConfig = kLPI2C_4PinUnidirectional;",
+    "golden_patch": "Replace kLPI2C_4PinUnidirectional with kLPI2C_2PinOpenDrain in target_workspace/mcu_firmware/main.c.",
+    "retrieval_expected_sources": [
+      "IMX93_12_LPI2C.pdf",
+      "fsl_lpi2c.c",
+      "fsl_lpi2c.h"
+    ],
+    "expected_uart_regex": "MCU Booting|LPI2C.*Initialized|Build Passed",
+    "crash_patterns": [
+      "Kernel panic",
+      "HardFault",
+      "HARD FAULT",
+      "Segmentation fault",
+      "Invalid Memory Access"
+    ],
+    "mock_uart_log_after_fix": "MCU Booting...\nLPI2C2 Initialized\nBuild Passed: 0 Errors, 0 Warnings",
     "human_baseline_time_sec": 180,
-    "user_prompt": "請幫我編譯 MCU 專案。如果編譯失敗，請查閱 i.MX93 參考手冊，了解該晶片的 LPI2C 腳位模式限制，並修改原始碼 (目標檔案的相對路徑為 target_workspace/mcu_firmware/main.c)，直到編譯成功為止。"
+    "max_repair_iterations": 5,
+    "user_prompt": "Please compile the MCU project. If compilation fails, inspect the i.MX93 LPI2C pin configuration limitation and repair target_workspace/mcu_firmware/main.c until the build passes."
   },
   {
-    "bug_id": "BUG_YOCTO_005",
-    "category": "Massive Log & Tool-Dependent",
-    "description": "Yocto 核心配方檔案被意外重新命名，導致依賴遺失 (Yocto core recipe file accidentally renamed, causing missing dependency)",
+    "bug_id": "BUG_CONFIG_002",
+    "category": "Linker and Configuration Errors",
+    "toolchain": "Yocto BitBake",
+    "target": "Cortex-A55",
+    "description": "Yocto U-Boot recipe file is accidentally renamed, causing provider/dependency failure.",
     "target_file": "target_workspace/mpu_linux_bsp/recipes-bsp/u-boot/u-boot-imx_2023.04.bb",
     "fault_action": "rename_file",
     "target_content": "target_workspace/mpu_linux_bsp/recipes-bsp/u-boot/u-boot-imx_2023.04.bb.bak",
+    "golden_patch": "Restore target_workspace/mpu_linux_bsp/recipes-bsp/u-boot/u-boot-imx_2023.04.bb from the renamed .bak file.",
+    "retrieval_expected_sources": [
+      "Yocto_04_Dev_Tasks.pdf",
+      "u-boot-imx_2023.04.bb"
+    ],
+    "expected_uart_regex": "U-Boot.*i\\.MX93|Starting kernel|Mock Build successful",
+    "crash_patterns": [
+      "Kernel panic",
+      "No provider",
+      "Fetcher failure",
+      "do_fetch failed",
+      "ERROR:"
+    ],
+    "mock_uart_log_after_fix": "U-Boot 2023.04 for NXP i.MX93 EVK\nStarting kernel ...\nMock Build successful. Image generated.",
     "human_baseline_time_sec": 420,
-    "user_prompt": "請幫我觸發 MPU 的遠端 Yocto 建置。如果出現 do_fetch 或 Provider 找不到的錯誤，請分析 Yocto 日誌，找出是哪個 bb 檔案遺失，並在伺服器上修復它。"
+    "max_repair_iterations": 5,
+    "user_prompt": "Please trigger the remote Yocto build for the MPU BSP. If a provider or recipe-missing error appears, analyze the Yocto log, identify the missing .bb file, restore it, and rebuild."
   },
   {
-    "bug_id": "BUG_DTS_008",
-    "category": "Text-Dependent Bugs",
-    "description": "Device Tree (DTS) 節點未正確閉合導致語法污染 (Unclosed Device Tree (DTS) node causing syntax corruption)",
+    "bug_id": "BUG_DTS_003",
+    "category": "Device Tree and BSP Integration Errors",
+    "toolchain": "Yocto DTC",
+    "target": "Cortex-A55",
+    "description": "Device Tree node is corrupted by an appended unclosed LPI2C block.",
     "target_file": "target_workspace/mpu_linux_bsp/arch/arm64/boot/dts/freescale/imx93-11x11-evk.dts",
     "fault_action": "append_text",
     "target_content": "&lpi2c2 {\n    status = \"okay\";\n    /* FATAL: Missing closing brace } */",
+    "golden_patch": "Remove the appended malformed &lpi2c2 block from imx93-11x11-evk.dts.",
+    "retrieval_expected_sources": [
+      "imx93-11x11-evk.dts",
+      "IMX93_EVK_02_I2C_Interface.pdf",
+      "Yocto_04_Dev_Tasks.pdf"
+    ],
+    "expected_uart_regex": "Linux version|i2c.*initialized|DTC.*passed",
+    "crash_patterns": [
+      "Kernel panic",
+      "syntax error",
+      "FATAL",
+      "ERROR:",
+      "HardFault"
+    ],
+    "mock_uart_log_after_fix": "Linux version 6.1.22-nxp\nDTC syntax passed\ni2c-2 initialized successfully",
     "human_baseline_time_sec": 240,
-    "user_prompt": "請幫我重新編譯 Yocto 專案。若遇到 dtc (Device Tree Compiler) 回報語法錯誤 (Syntax Error)，請定位損壞的 dts 檔案並利用工具將最後一行多餘/錯誤的區塊移除。"
+    "max_repair_iterations": 5,
+    "user_prompt": "Please rebuild the Yocto project. If dtc reports a Device Tree syntax error, locate the corrupted DTS file and remove the malformed appended block."
+  },
+  {
+    "bug_id": "BUG_RUNTIME_004",
+    "category": "Runtime and Hardware-Behavior Errors",
+    "toolchain": "Mock UART",
+    "target": "Cortex-A55 + Cortex-M33",
+    "description": "Build can pass, but runtime validation must reject crash signatures and require expected UART behavior.",
+    "target_file": "target_workspace/mcu_firmware/main.c",
+    "fault_action": "replace_text",
+    "fault_search": "LPI2C_MasterInit(LPI2C1, &masterConfig, 24000000U);",
+    "target_content": "LPI2C_MasterInit(LPI2C2, &masterConfig, 24000000U);",
+    "golden_patch": "Use the board-supported LPI2C instance expected by the validation signature.",
+    "retrieval_expected_sources": [
+      "IMX93_EVK_02_I2C_Interface.pdf",
+      "fsl_lpi2c.c",
+      "fsl_lpi2c.h"
+    ],
+    "expected_uart_regex": "LPI2C1.*Initialized|Peripheral validation passed",
+    "crash_patterns": [
+      "Kernel panic",
+      "HardFault",
+      "HARD FAULT",
+      "Invalid Memory Access",
+      "send timeout"
+    ],
+    "mock_uart_log_after_fix": "MCU Booting...\nLPI2C1 Initialized\nPeripheral validation passed",
+    "human_baseline_time_sec": 300,
+    "max_repair_iterations": 5,
+    "user_prompt": "Please compile and validate the MCU firmware. The build may pass, but the repair is only successful if UART validation shows the expected LPI2C initialization without crash signatures."
   }
 ]

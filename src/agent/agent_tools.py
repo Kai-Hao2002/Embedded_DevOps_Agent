@@ -95,10 +95,11 @@ def deploy_mpu_image(dummy_arg: str = "") -> str:
     return "✅ UUU flashes successfully!" if flash_success else "❌ UUU flashes failed!"
 
 @tool
-def monitor_device_logs(port_name: str) -> str:
+def monitor_device_logs(port_name: str = "") -> str:
     """
     用於監聽實體或虛擬開發板的 UART 序列埠開機日誌。
     Used to monitor the boot logs of the UART serial port on a physical or virtual development board.
     """
-    success, report = monitor_uart_log(port_name, duration=8)
+    selected_port = port_name or os.getenv("TARGET_SERIAL_PORT", "/dev/ttys000")
+    success, report = monitor_uart_log(selected_port, duration=8)
     return report

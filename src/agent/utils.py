@@ -16,7 +16,7 @@ def get_llm(provider="gemini"):
         gemini_key = os.getenv("GEMINI_API_KEY")
         if not gemini_key:
             raise ValueError("❌ Missing GEMINI_API_KEY in .env file!")
-        return ChatGoogleGenerativeAI(model="gemini-2.5-pro", google_api_key=gemini_key, temperature=0)
+        return ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_key, temperature=0)
     
     elif provider == "claude":
         anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")

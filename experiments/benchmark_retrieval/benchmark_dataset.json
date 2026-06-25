@@ -1,32 +1,44 @@
 [
   {
-    "bug_id": "BUG_I2C_001",
-    "category": "Vision-Dependent",
-    "query": "[ 3.012000] i2c i2c-2: send timeout, device address 0x25. What register should I check for LPI2C2?",
+    "bug_id": "BUG_COMPILE_001",
+    "category": "Syntax and Compile Errors",
+    "query": "target_workspace/mcu_firmware/main.c reports unsupported kLPI2C_4PinUnidirectional on i.MX93. Which LPI2C configuration and driver files should be checked?",
     "expected_sources": [
       "IMX93_12_LPI2C.pdf",
+      "fsl_lpi2c.c",
+      "fsl_lpi2c.h"
+    ],
+    "description": "The retriever should find LPI2C manual context and SDK driver sources for the unsupported pin mode."
+  },
+  {
+    "bug_id": "BUG_CONFIG_002",
+    "category": "Linker and Configuration Errors",
+    "query": "Yocto BitBake reports no provider or missing recipe for u-boot-imx_2023.04.bb during BSP build. Which recipe or Yocto development guide should be retrieved?",
+    "expected_sources": [
+      "Yocto_04_Dev_Tasks.pdf",
+      "u-boot-imx_2023.04.bb"
+    ],
+    "description": "The retriever should identify the missing U-Boot recipe and Yocto debugging documentation."
+  },
+  {
+    "bug_id": "BUG_DTS_003",
+    "category": "Device Tree and BSP Integration Errors",
+    "query": "dtc syntax error in imx93-11x11-evk.dts after adding an lpi2c2 node. Which DTS file and I2C board documentation should be checked?",
+    "expected_sources": [
+      "imx93-11x11-evk.dts",
+      "IMX93_EVK_02_I2C_Interface.pdf"
+    ],
+    "description": "The retriever should find the DTS source and board-level I2C documentation."
+  },
+  {
+    "bug_id": "BUG_RUNTIME_004",
+    "category": "Runtime and Hardware-Behavior Errors",
+    "query": "UART validation shows LPI2C initialization mismatch after build passes. Which board I2C interface document and LPI2C driver files should be retrieved?",
+    "expected_sources": [
       "IMX93_EVK_02_I2C_Interface.pdf",
-      "fsl_lpi2c.c"
+      "fsl_lpi2c.c",
+      "fsl_lpi2c.h"
     ],
-    "description": "PMIC I2C timeout. Requires checking EVK manual for address mapping, RM for LPI2C status registers, and the driver source code."
-  },
-  {
-    "bug_id": "BUG_YOCTO_002",
-    "category": "Massive Log",
-    "query": "ERROR: Task do_fetch failed: Fetcher failure: Unable to fetch URL from any source. Recipe: imx-image-multimedia.",
-    "expected_sources": [
-      "Yocto_04_Dev_Tasks.pdf"
-    ],
-    "description": "Yocto bitbake fetch failure. Needs the Yocto Mega Manual section on development tasks and fetcher debugging."
-  },
-  {
-    "bug_id": "BUG_KEIL_003",
-    "category": "Tool-Dependent",
-    "query": "Error: L6218E: Undefined symbol LPI2C_MasterInit (referred from main.o).",
-    "expected_sources": [
-      "fsl_lpi2c.h",
-      "fsl_lpi2c.c"
-    ],
-    "description": "Keil Linker error. The AI should retrieve the C header and source files to verify the function signature."
+    "description": "The retriever should support runtime fault localization by returning board interface and driver context."
   }
 ]

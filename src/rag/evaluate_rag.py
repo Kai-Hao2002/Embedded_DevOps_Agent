@@ -13,7 +13,11 @@ from langchain_classic.chains import create_retrieval_chain
 from langchain_community.retrievers import BM25Retriever
 from langchain_classic.retrievers import EnsembleRetriever
 
-DB_PATH = "./chroma_db"
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+DB_PATH = os.path.join(PROJECT_ROOT, "chroma_db")
+SPLITS_PATH = os.path.join(PROJECT_ROOT, "splits.pkl")
+BENCHMARK_PATH = os.path.join(PROJECT_ROOT, "experiments", "benchmark_retrieval", "benchmark_dataset.json")
+RESULTS_PATH = os.path.join(PROJECT_ROOT, "experiments", "results", "retrieval_benchmark_results.csv")
 
 def setup_rag_chain():
     """初始化 LLM 與檢索鏈 (Initialize LLM and Retrieval Chain)"""
@@ -35,9 +39,9 @@ def setup_rag_chain():
     chroma_retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
 
     # 2. 🌟 新增：載入 BM25 關鍵字檢索器 (Load BM25 Keyword Retriever)
-    if not os.path.exists("splits.pkl"):
+    if not os.path.exists(SPLITS_PATH):
         raise FileNotFoundError("❌ splits.pkl not found! Run ingest_data.py first.")
-    with open("splits.pkl", "rb") as f:
+    with open(SPLITS_PATH, "rb") as f:
         splits = pickle.load(f)
     bm25_retriever = BM25Retriever.from_documents(splits)
     bm25_retriever.k = 10
@@ -87,6 +91,22 @@ def calculate_mrr(retrieved_docs, expected_sources):
                 
     return 0.0 # Top K 內皆未命中 / No hits in Top K
 
+def calculate_recall_at_k(retrieved_docs, expected_sources, k=5):
+    if not expected_sources:
+        return 0.0
+
+    top_docs = retrieved_docs[:k]
+    matched = set()
+    for doc in top_docs:
+        actual_source = doc.metadata.get("source", "")
+        for expected in expected_sources:
+            if expected in actual_source:
+                matched.add(expected)
+    return len(matched) / len(expected_sources)
+
+def calculate_topk_accuracy(retrieved_docs, expected_sources, k=5):
+    return 1.0 if calculate_recall_at_k(retrieved_docs, expected_sources, k) > 0 else 0.0
+
 def run_benchmark_evaluation():
     print("🚀 Initializing Retrieval Benchmark Evaluator...")
     try:
@@ -95,7 +115,7 @@ def run_benchmark_evaluation():
         print(f"Initialization Error: {e}")
         return
 
-    benchmark_path = os.path.join(os.path.dirname(__file__), "benchmark_dataset.json")
+    benchmark_path = BENCHMARK_PATH
     if not os.path.exists(benchmark_path):
         print(f"❌ 找不到基準測試檔 (Benchmark file not found): {benchmark_path}")
         return
@@ -107,6 +127,8 @@ def run_benchmark_evaluation():
     print("-" * 60)
 
     total_mrr = 0.0
+    total_recall_at_5 = 0.0
+    total_top5_accuracy = 0.0
 
     for test in test_suite:
         print(f"評估中 (Evaluating) [{test['bug_id']}] - {test['category']} ...")
@@ -114,7 +136,11 @@ def run_benchmark_evaluation():
         # 1. 僅觸發檢索器以計算 MRR (Trigger retriever only to calculate MRR)
         retrieved_docs = ensemble_retriever.invoke(test["query"])
         mrr_score = calculate_mrr(retrieved_docs, test["expected_sources"])
+        recall_at_5 = calculate_recall_at_k(retrieved_docs, test["expected_sources"], k=5)
+        top5_accuracy = calculate_topk_accuracy(retrieved_docs, test["expected_sources"], k=5)
         total_mrr += mrr_score
+        total_recall_at_5 += recall_at_5
+        total_top5_accuracy += top5_accuracy
 
         # 2. (選擇性) 觸發完整 RAG 鏈取得文字回答 (Optional: Trigger full RAG chain for text answer)
         # response = rag_chain.invoke({"input": test["query"]})
@@ -124,22 +150,29 @@ def run_benchmark_evaluation():
             "Bug ID": test["bug_id"],
             "Category": test["category"],
             "MRR": round(mrr_score, 4),
+            "Recall@5": round(recall_at_5, 4),
+            "Top-5 Accuracy": round(top5_accuracy, 4),
             "Expected Sources": ", ".join(test["expected_sources"])
         })
         time.sleep(1) # 避免 API 速率限制 / Avoid API rate limits
 
     # 產出報告 / Generate Report
     df = pd.DataFrame(results)
-    csv_filename = "retrieval_benchmark_results.csv"
+    os.makedirs(os.path.dirname(RESULTS_PATH), exist_ok=True)
+    csv_filename = RESULTS_PATH
     df.to_csv(csv_filename, index=False, encoding="utf-8-sig")
     
     average_mrr = total_mrr / len(test_suite) if test_suite else 0
+    average_recall_at_5 = total_recall_at_5 / len(test_suite) if test_suite else 0
+    average_top5_accuracy = total_top5_accuracy / len(test_suite) if test_suite else 0
     
     print("\n✅ 評估完成！ (Evaluation Complete!)")
     print(f"🏆 系統平均 MRR 倒數排名分數 (System Average MRR): {average_mrr:.4f}")
+    print(f"🏆 平均 Recall@5: {average_recall_at_5:.4f}")
+    print(f"🏆 平均 Top-5 Accuracy: {average_top5_accuracy:.4f}")
     print(f"📁 詳細報告已儲存至 (Detailed report saved to): {os.path.abspath(csv_filename)}")
     print("\n📊 測試結果摘要 (Summary):")
-    print(df[["Bug ID", "Category", "MRR"]].to_string(index=False))
+    print(df[["Bug ID", "Category", "MRR", "Recall@5", "Top-5 Accuracy"]].to_string(index=False))
 
 if __name__ == "__main__":
     run_benchmark_evaluation()

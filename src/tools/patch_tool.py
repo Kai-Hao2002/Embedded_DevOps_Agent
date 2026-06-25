@@ -2,6 +2,7 @@ import os
 import re
 import difflib
 import subprocess
+import time
 from langchain_core.tools import tool
 
 
@@ -22,7 +23,14 @@ def read_file_tool(file_path: str) -> str:
         # 幫程式碼加上行號，方便 AI 閱讀與定位
         lines = content.split('\n')
         numbered_lines = [f"{i+1:03d} | {line}" for i, line in enumerate(lines)]
-        return "檔案內容如下：\n" + "\n".join(numbered_lines)
+        return (
+            "Numbered preview for navigation:\n"
+            + "\n".join(numbered_lines)
+            + "\n\nRaw content for apply_patch_tool search_context. Copy from this block only:\n"
+            + "```text\n"
+            + content
+            + "\n```"
+        )
     except Exception as e:
         return f"❌ 讀取檔案時發生錯誤: {e}"
     
@@ -81,8 +89,15 @@ def apply_patch_tool(file_path: str, search_context: str, replace_content: str) 
         fromfile=f"a/{file_path}", tofile=f"b/{file_path}", n=3 
     )
     patch_content = "".join(diff)
+
+    patches_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "patches"))
+    os.makedirs(patches_dir, exist_ok=True)
+    safe_name = re.sub(r"[^a-zA-Z0-9_.-]+", "_", file_path).strip("_")
+    patch_path = os.path.join(patches_dir, f"{int(time.time())}_{safe_name}.patch")
+    with open(patch_path, "w", encoding="utf-8") as f:
+        f.write(patch_content)
     
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(new_code)
 
-    return f"✅ Repair successful! Modifications have been applied and a Unified Diff has been generated. Please request DevOps_Expert to recompile."
+    return f"✅ Repair successful! Modifications have been applied. Unified Diff saved to {patch_path}. Please request DevOps_Expert to recompile."
