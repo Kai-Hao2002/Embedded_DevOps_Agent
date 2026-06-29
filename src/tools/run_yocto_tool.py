@@ -38,58 +38,67 @@ def _connect_ssh_with_retry(host, port, username, password, max_retries=3, delay
             
     return None
 
-def extract_critical_yocto_logs(log_content: str, context_lines: int = 50) -> str:
+def extract_critical_yocto_logs(log_content: str) -> str:
     """
-    【日誌截斷器 Log Truncator】
-    使用 Regex 提取 ERROR 和 WARNING 及其上下文，並過濾掉無意義的 NOTE。
-    【Log Truncator】
-    Uses Regex to extract ERROR and WARNING messages and their context, and filters out meaningless NOTE messages.
+    【日誌截斷器 Log Truncator - 層級化壓縮版】
+    不直接回傳海量上下文，而是萃取「錯誤摘要」與「詳細日誌路徑」，
+    強迫 AI 代理人使用讀檔工具去查閱真正的錯誤細節，大幅節省 Token。
+    
+    [Log Truncator - Hierarchical Compression Version]
+    Instead of returning massive context directly, it extracts the "Error Summary" and "Detailed Log Paths",
+    forcing the AI agent to use file-reading tools to inspect the real error details, significantly saving Tokens.
     """
     lines = log_content.splitlines()
-    critical_indices = set()
-    detailed_log_path = None
     
-    # 尋找關鍵字 (支援 ERROR:, WARNING:, FATAL:, failed)
-    for i, line in enumerate(lines):
-        # 擷取 Yocto 提示的詳細日誌路徑 (Capture specific task log path)
+    errors_found = []
+    detailed_log_paths = []
+    
+    for line in lines:
+        # 擷取 Yocto 提示的詳細日誌路徑 (Capture the detailed log path prompted by Yocto)
         if "Logfile of failure stored in:" in line:
             match = re.search(r'Logfile of failure stored in:\s*(/[^\s]+)', line)
             if match:
-                detailed_log_path = match.group(1)
-
-        if re.search(r'^(ERROR|WARNING|FATAL):', line, re.IGNORECASE) or "failed" in line.lower():
-            # 抓取該行前後文 (例如前後 50 行)
-            start = max(0, i - context_lines)
-            end = min(len(lines), i + context_lines + 1)
-            critical_indices.update(range(start, end))
-            
-    if not critical_indices:
-        # 如果沒找到明顯錯誤，回傳最後 50 行即可
-        return "\n".join(lines[-50:])
+                detailed_log_paths.append(match.group(1))
         
-    sorted_indices = sorted(list(critical_indices))
-    filtered_lines = []
+        # 擷取明確的 ERROR 或 FATAL 行，捨棄 WARNING 以免干擾主線
+        # (Capture explicit ERROR or FATAL lines, discard WARNINGs to avoid distracting the main thread)
+        if re.match(r'^(ERROR|FATAL ERROR|FAILED):', line, re.IGNORECASE):
+            # 過濾掉太長的 gcc 雜訊，保留純粹的 Yocto 錯誤宣告
+            # (Filter out overly long gcc noise, keeping pure Yocto error declarations)
+            if len(line) < 200: 
+                errors_found.append(line.strip())
+                
+    # 組裝「層級化地圖」回報給 AI (Assemble the "Hierarchical Map" to report back to the AI)
+    report = []
+    report.append("🚨 [Yocto Build Failed] 系統發生建置錯誤！(System Build Error!)")
+    report.append("="*50)
+    report.append("📋 【錯誤摘要 Error Summary】:")
     
-    # 進行過濾
-    for idx in sorted_indices:
-        line = lines[idx]
-        # 濾除正常的 NOTE 與海量的 gcc 編譯輸出雜訊
-        if not line.startswith("NOTE:") and "gcc" not in line:
-            filtered_lines.append(line)
-            
-    # 如果過濾後依然很長，加強截斷以保護 Token
-    truncated_log = "\n...\n".join(filtered_lines)
-    if detailed_log_path:
-        header = (
-            f"🚨 [System Info] Yocto build failed. The detailed task log is stored at:\n"
-            f"   >>> {detailed_log_path} <<<\n"
-            f"💡 Knowledge Expert MUST use `execute_bash_command` (e.g., `cat {detailed_log_path}`) "
-            f"to read this specific file for the actual root cause!\n\n"
-        )
-        truncated_log = header + truncated_log
-    if len(truncated_log) > 10000:
-        return truncated_log[:10000] + "\n... [Log Truncated due to size limits] ..."
-    return truncated_log
+    if errors_found:
+        # 去除重複的錯誤行 (Remove duplicate error lines)
+        unique_errors = list(dict.fromkeys(errors_found))
+        for err in unique_errors[:5]: # 最多只顯示前 5 個主要錯誤 (Show up to the top 5 main errors)
+            report.append(f" - {err}")
+    else:
+        report.append(" - (未能在主控台捕捉到簡短錯誤，請直接查看下方詳細日誌 / Could not capture a short error in the console, please check the detailed logs below)")
+        
+    report.append("="*50)
+    
+    if detailed_log_paths:
+        report.append("📂 【詳細日誌路徑 Detailed Task Logs】:")
+        unique_paths = list(dict.fromkeys(detailed_log_paths))
+        for path in unique_paths:
+            report.append(f" 👉 {path}")
+        
+        report.append("\n💡 [System Directive to Knowledge_Expert]:")
+        report.append("DO NOT GUESS the error. You MUST use the `execute_bash_command` (e.g., `cat <path>`) or `read_file_tool` to read the exact detailed log files listed above to find the root cause!")
+    else:
+        # 如果沒有找到具體路徑，就回退到回傳最後 30 行，避免完全沒線索
+        # (If no specific paths are found, fallback to returning the last 30 lines to avoid having no clues at all)
+        report.append("⚠️ [Fallback] 找不到獨立的 task log 路徑，以下為最後 30 行日誌： (Could not find independent task log paths, below are the last 30 lines of the log:)")
+        report.append("\n".join(lines[-30:]))
+        
+    return "\n".join(report)
 
 def trigger_remote_build(target_recipe="imx-image-multimedia"):
     """
@@ -98,7 +107,18 @@ def trigger_remote_build(target_recipe="imx-image-multimedia"):
     """
     if EXECUTION_MODE == "MOCK":
         print("🧪 [Mock Mode] Simulates triggering remote Yocto compilation...")
-        time.sleep(1) # 模擬網路延遲
+        chaos_event = random.choices(["NORMAL", "SSH_TIMEOUT", "CONNECTION_REFUSED"], weights=[70, 20, 10])[0]
+        
+        if chaos_event == "SSH_TIMEOUT":
+            print("⚠️ [Chaos] SSH IMEOUT...")
+            time.sleep(3)
+            return "❌ Critical Network Error: Unable to connect to the Yocto server; SSH Timeout."
+        elif chaos_event == "CONNECTION_REFUSED":
+            print("⚠️ [Chaos] CONNECTION REFUSED...")
+            time.sleep(1)
+            return "❌ Critical Network Error: Connection refused by Yocto server."
+        
+        time.sleep(1)
         return "✅ Yocto remote compilation has started in the background (Mock). Please use the status check tool to track the progress."
 
     print("🌐 [Real Mode] Connecting and launching Yocto Build in the background....")
@@ -119,6 +139,11 @@ def trigger_remote_build(target_recipe="imx-image-multimedia"):
 def check_build_status():
     """狀態輪詢：檢查背景編譯任務的最新日誌/Status polling: Check the latest logs of background compilation tasks."""
     if EXECUTION_MODE == "MOCK":
+        chaos_event = random.choices(["NORMAL", "SERVER_OVERLOAD"], weights=[85, 15])[0]
+        if chaos_event == "SERVER_OVERLOAD":
+            print("⚠️ [Chaos] SERVER OVERLOAD...")
+            time.sleep(2)
+            return "❌ Log read timeout. The server may be overloaded. Please try again later."
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
         # Attempt to load the real Yocto error log (if it exists)

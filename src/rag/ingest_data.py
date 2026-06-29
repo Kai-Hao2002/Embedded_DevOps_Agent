@@ -115,22 +115,30 @@ def build_vector_database():
         for root, _, files in os.walk(CODE_PATH):
             for filename in files:
                 file_path = os.path.join(root, filename)
+                core_label = "M33" if "mcu_firmware" in file_path else "A55" if "mpu_linux_bsp" in file_path else "BOTH"
                 
                 if filename.endswith(".c") or filename.endswith(".h"):
                     loader = TextLoader(file_path, encoding='utf-8')
                     loaded_docs = loader.load()
-                    for doc in loaded_docs: doc.metadata["source_type"] = "c_code"
+                    for doc in loaded_docs: 
+                        doc.metadata["source_type"] = "c_code"
+                        doc.metadata["target_core"] = core_label 
                     c_cpp_docs.extend(loaded_docs)
                     
                 elif filename.endswith(".dts") or filename.endswith(".dtsi"):
                     loader = TextLoader(file_path, encoding='utf-8')
                     loaded_docs = loader.load()
-                    for doc in loaded_docs: doc.metadata["source_type"] = "dts"
+                    for doc in loaded_docs: 
+                        doc.metadata["source_type"] = "dts"
+                        doc.metadata["target_core"] = core_label
                     dts_docs.extend(loaded_docs)
+
                 elif filename.endswith(".bb") or filename.endswith(".bbappend") or filename.endswith(".conf"):
                     loader = TextLoader(file_path, encoding='utf-8')
                     loaded_docs = loader.load()
-                    for doc in loaded_docs: doc.metadata["source_type"] = "yocto_recipe"
+                    for doc in loaded_docs: 
+                        doc.metadata["source_type"] = "yocto_recipe"
+                        doc.metadata["target_core"] = core_label
                     yocto_docs.extend(loaded_docs)
 
     print("\n🌐 Loading Web documents via WebBaseLoader...")

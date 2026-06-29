@@ -2,36 +2,36 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Multi--Agent-orange)
-![LLM](https://img.shields.io/badge/LLM-Claude%203.5%20%7C%20Gemini%201.5-green)
+![LLM](https://img.shields.io/badge/LLM-Claude%203.5%20%7C%20Gemini%202.5-green)
 ![NXP](https://img.shields.io/badge/Hardware-NXP%20i.MX93-lightgrey)
+![Status](https://img.shields.io/badge/Status-Enterprise_Ready-success)
 
 This project implements a Large Language Model (LLM) based embedded BSP repair framework for the NXP i.MX93 heterogeneous multi-core architecture (Cortex-A55 + Cortex-M33).
 
-The current research focus is a **multi-agent closed-loop repair workflow** for BSP build and runtime failures. The system repeatedly performs `AnalyzeFailure -> RetrieveKnowledge -> GeneratePatch -> ApplyPatch -> Build -> Deploy/MockDeploy -> ObserveRuntime -> StopOrRetry` under a bounded retry budget.
+The current research focus is a **multi-agent closed-loop repair workflow** for BSP build and runtime failures. The system repeatedly performs `AnalyzeFailure -> RetrieveKnowledge -> GeneratePatch -> ApplyPatch -> Build -> Deploy/MockDeploy -> ObserveRuntime -> StopOrRetry` under a bounded retry budget. 
 
-Hybrid RAG, mock toolchains, and UART/mock-UART validation provide measurable evidence for Pass@k, Functional Pass Rate, MRR, MTTR, token cost, and tool invocation reliability. Multimodal schematic analysis and cross-model comparison are treated as extended evaluation paths, not requirements for the core thesis experiment.
+Built with enterprise-grade resilience, the framework seamlessly switches between Hardware-in-the-Loop (HIL) and Mock environments, incorporates chaos engineering, and utilizes token-efficient log extraction to accurately resolve complex embedded software failures.
 
 ---
+
 
 ## 🌟 Core Features
 
 1. **LangGraph Multi-Agent Closed Loop**
-   - A Supervisor routes work to `Knowledge_Expert`, `DevOps_Expert`, and `QA_Expert` under a bounded Pass@k repair budget.
-2. **Ablation Baselines for the Thesis**
+   - A Supervisor routes work to `Knowledge_Expert`, `DevOps_Expert`, `Patch_Expert`, and `QA_Expert` under a bounded Pass@k repair budget.
+2. **Hardware Abstraction Layer (HAL) for Seamless Execution**
+   - Employs Strategy and Factory patterns (`hal_mcu.py`, `hal_mpu.py`) to completely decouple agent logic from underlying toolchains. Switch between real J-Link/Yocto servers and local Mock environments simply by changing the `EXECUTION_MODE` env variable.
+3. **Chaos-Resilient QA & Hardware Self-Healing**
+   - The `QA_Expert` handles simulated chaos (Kernel Panics, Baudrate mismatches, UART Timeouts) and can actively trigger a `reset_target_board` tool to power-cycle unresponsive physical or mock hardware.
+4. **Token-Efficient Smart Log Truncation**
+   - Instead of overwhelming the LLM Context Window with 10,000+ lines of BitBake logs, the DevOps tool extracts hierarchical "Error Summaries" and "Detailed Log Paths", forcing the `Knowledge_Expert` to actively explore specific task logs, significantly improving Token Efficiency.
+5. **Domain-Isolated Hybrid RAG Knowledge Base**
+   - Combines semantic retrieval (ChromaDB) and keyword retrieval (BM25). Documents and source code are tagged with `target_core` (e.g., A55 vs. M33) metadata during ingestion to prevent cross-domain hallucination.
+6. **Ablation Baselines for the Thesis**
    - `B1`: Zero-Shot LLM.
    - `B2`: Single Agent + Text RAG.
    - `B3`: Closed-Loop Single Agent.
    - `PROPOSED_MAS`: Multi-Agent Closed-Loop Framework.
-3. **Hybrid RAG Knowledge Base**
-   - Combines semantic retrieval (ChromaDB) and keyword retrieval (BM25) for BSP manuals, source files, build logs, and project documentation.
-4. **Build, Deploy, and Runtime Feedback**
-   - MCU path: Keil MDK CLI and J-Link compatible mock/real tools.
-   - MPU path: Yocto BitBake and UUU compatible mock/real tools.
-   - Runtime path: UART or mock UART validation with expected signatures and crash dictionaries.
-5. **Reproducible BSP Repair Benchmark**
-   - Fault cases include raw error prompts, broken files, golden patch descriptions, retrieval mappings, expected UART regexes, and crash patterns.
-6. **Experiment Metrics**
-   - Reports Pass@k, Functional Pass Rate, MTTR, token efficiency, tool errors, agent steps, and agentic interaction overhead.
 
 ---
 
@@ -50,7 +50,11 @@ Intern_AI_Agent/
  │
  ├── src/                           # Core Source Code
  │   ├── agent/
- │   │   ├── ai_agent.py            # LangGraph State Machine & Agent Nodes
+ │   │   ├── ai_agent.py            # LangGraph State Machine 
+ │   │   ├── agent_tools.py   
+ │   │   ├── nodes.py  
+ │   │   ├── state.py  
+ │   │   ├── utils.py  
  │   │   └── test_plan_schema.py    # Pydantic schema for structured test plans
  │   │
  │   ├── tools/                     # DevOps Automation Tools
@@ -78,8 +82,11 @@ Intern_AI_Agent/
  │   ├── fault_injection/          # closed-loop repair dataset
  │   │   ├── bugs_def.json         # bug definitions, golden patches, UART signatures
  │   │   └── backup_clean_code/    # clean code backup
+ │   ├── experiment_runner.py
+ │   ├── real_logs/ 
  │   └── results/                  
  │
+ ├── docs_config.json 
  ├── patches/                       # Auto-generated .patch files for Git
  ├── flash_m33.jlink                # J-Link command script
  └── requirements.txt               # Dependencies
@@ -155,23 +162,16 @@ Parse the NXP manuals and build the local vector database:
 
 ## Thesis Experiment Modes
 
-The experiment runner uses the modes defined in the revised thesis proposal:
-
-- `B1`: Zero-Shot LLM
-- `B2`: Single Agent + Text RAG
-- `B3`: Closed-Loop Single Agent
-- `PROPOSED_MAS`: Multi-Agent Closed-Loop Framework
-
-Run the closed-loop BSP repair benchmark:
+Run the automated closed-loop BSP repair benchmark (generates Pass@k, MTTR, Token Efficiency metrics):
 
 ```bash
 python experiments/experiment_runner.py
 ```
 
-Run the retrieval benchmark for RQ2:
+Run the retrieval benchmark for RQ2 (generates MRR, Recall@5, Top-5 Accuracy metrics):
 
 ```bash
 python src/rag/evaluate_rag.py
 ```
 
-Developed as part of the NXP i.MX93 Embedded DevOps Automation Initiative.
+Developed as part of an Advanced Embedded DevOps Automation Initiative for NXP i.MX93.

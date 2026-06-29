@@ -5,18 +5,17 @@ import sys
 import random
 
 def get_random_scenario():
-    """決定這次開機要發生什麼狀況 (目前已強制設為成功)"""
-    # 🔴 原本的隨機邏輯已註解掉，未來想測試錯誤時可以解除註解
-    # scenarios = [
-    #     "NORMAL_PANIC",    # 傳統的 Kernel Panic
-    #     "BAUDRATE_ERROR",  # 亂碼 (Baud rate 設錯)
-    #     "TIMEOUT",         # 開機沒反應 (卡死)
-    #     "HARD_FAULT"       # Cortex-M33 崩潰
-    # ]
-    # return random.choices(scenarios, weights=[40, 20, 20, 20])[0]
-
-    # 🟢 強制回傳正常成功開機的情境
-    return "NORMAL"
+    """決定這次開機要發生什麼狀況 (解除強制成功，引入混沌工程)"""
+    scenarios = [
+        "NORMAL",          # 完美的成功開機
+        "NORMAL_PANIC",    # 傳統的 Kernel Panic
+        "BAUDRATE_ERROR",  # 亂碼 (Baud rate 設錯)
+        "TIMEOUT",         # 開機沒反應 (卡死)
+        "HARD_FAULT"       # Cortex-M33 崩潰
+    ]
+    # 設定不同情境的發生機率 (可依照測試需求自由調整 weights)
+    # 目前設定 NORMAL 有 40% 機率，其餘異常狀況各佔 15%
+    return random.choices(scenarios, weights=[40, 15, 15, 15, 15])[0]
 
 def start_virtual_board():
     master, slave = pty.openpty()

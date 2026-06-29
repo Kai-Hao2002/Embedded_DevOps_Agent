@@ -15,7 +15,7 @@ from agent.utils import get_llm, get_image_base64
 from agent.test_plan_schema import TestPlanSchema
 from agent.agent_tools import (
     compile_and_flash_mcu, start_mpu_build, check_mpu_build_status, 
-    deploy_mpu_image, monitor_device_logs
+    deploy_mpu_image, monitor_device_logs, reset_target_board
 )
 # 引入 RAG 與 Patch 工具
 from tools.rag_tool import query_nxp_knowledge_base 
@@ -31,7 +31,7 @@ knowledge_agent = create_react_agent(
 )
 patch_agent = create_react_agent(llm, tools=[read_file_tool, apply_patch_tool, execute_bash_command])
 devops_agent = create_react_agent(llm, tools=[compile_and_flash_mcu, start_mpu_build, check_mpu_build_status, deploy_mpu_image])
-qa_agent = create_react_agent(llm, tools=[monitor_device_logs])
+qa_agent = create_react_agent(llm, tools=[monitor_device_logs, reset_target_board])
 # B1: Zero-shot LLM, no tools.
 zeroshot_agent = create_react_agent(llm, tools=[])
 # B2: Single Agent + Text RAG, no build/deploy/runtime feedback.
@@ -246,7 +246,13 @@ def qa_node(state: AgentState):
     - Call Trace (Call stack function names)
     - PC (Program Counter) address / LR (Link Register)
     - Fault Registers (e.g., CFSR, BFAR)
-    The Knowledge Expert relies on these exact memory addresses and function symbols to perform accurate RAG retrieval!""")
+    The Knowledge Expert relies on these exact memory addresses and function symbols to perform accurate RAG retrieval!
+    
+    🚨 HARDWARE RESET RULE (NEW):
+    If the `monitor_device_logs` tool reports NO OUTPUT (Timeout), or the log ends abruptly indicating the board is completely bricked/frozen, you MUST:
+    1. Call `reset_target_board` immediately to power cycle the hardware.
+    2. After resetting, call `monitor_device_logs` ONE MORE TIME to see if the reset fixed the hang or if it produces a fresh error log.
+    """)
 
     baton = HumanMessage(content="[System] QA Expert, please monitor the UART logs and verify if the system is operating normally without crashes.")
     inputs = [sys_msg] + state["messages"] + [baton]

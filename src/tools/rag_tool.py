@@ -36,30 +36,38 @@ else:
 # 2. A tool that encapsulates Retriever into an Agent that can be used.
 # ==========================================
 @tool
-def query_nxp_knowledge_base(query: str) -> str:
+def query_nxp_knowledge_base(query: str, target_core: str = "BOTH") -> str:
     """
     Search the NXP i.MX93 official knowledge base, EVK manual, and Yocto guide.
+    Parameters:
+    - query: The search string.
+    - target_core: Specify "M33" for MCU/Bare-metal/Keil issues, "A55" for MPU/Linux/Yocto/DTS issues, or "BOTH" for general hardware specs.
     """
     if not ensemble_retriever:
-        return "Error: The NXP knowledge base was not loaded correctly and cannot be queried."
+        return "Error: The NXP knowledge base was not loaded correctly."
     
-    print(f"🔍 [[Knowledge Expert is flipping through the manual] '{query}' ...")
+    print(f"🔍 [Knowledge Expert searching for '{query}' in core '{target_core}'...]")
     
-    enhanced_query = query
-    if "base address" in query.lower() or "start address" in query.lower():
-        enhanced_query += " (focus on memory map and system memory layout)"
-        print(f"🪄 [System] Detected address lookup and has automatically expanded the search terms:{enhanced_query}")
+    # 這裡我們動態調整 Chroma Retriever 的過濾條件
+    # (Here we dynamically adjust the filter conditions of the Chroma Retriever)
+    if target_core in ["M33", "A55"]:
+        # 設定過濾器：只允許匹配的 Core 或是通用的 BOTH 文件
+        # (Set filter: only allow matching Core or universal BOTH documents)
+        chroma_retriever.search_kwargs["filter"] = {"target_core": {"$in": [target_core, "BOTH"]}}
+    else:
+        # 移除過濾器，全域搜尋 (Remove filter, global search)
+        chroma_retriever.search_kwargs.pop("filter", None)
 
-    # execute retriever
+    # 執行 Ensemble 檢索 (Execute Ensemble retrieval)
     docs = ensemble_retriever.invoke(query)
     
-    # Convert the retrieved document into plain text for LLM reading.
     context_list = []
     for i, doc in enumerate(docs, 1):
         source = os.path.basename(doc.metadata.get('source', 'Unknown'))
-        context_list.append(f"--- Document Snippet {i} (Source: {source}) ---\n{doc.page_content}")
+        core_info = doc.metadata.get('target_core', 'Unknown')
+        context_list.append(f"--- Document Snippet {i} (Source: {source}, Core: {core_info}) ---\n{doc.page_content}")
         
     if not context_list:
-        return "No relevant information was found in the knowledge base. Please try changing your keywords."
+        return "No relevant information was found. Try changing keywords or target_core."
         
     return "\n\n".join(context_list)

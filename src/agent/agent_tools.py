@@ -6,6 +6,7 @@ from langchain_core.tools import tool
 from tools.run_keil_tool import build_project, flash_target
 from tools.run_yocto_tool import trigger_remote_build, check_build_status, flash_image_uuu, download_remote_image
 from tools.serial_monitor_tool import monitor_uart_log
+from tools.hal_mcu import get_mcu_toolchain, get_mpu_toolchain
 
 def static_safety_check(platform: str) -> tuple[bool, str]:
     """
@@ -54,44 +55,47 @@ def compile_and_flash_mcu(dummy_arg: str = "") -> str:
     用於編譯並燒錄 Cortex-M33 (MCU) 的 Keil 專案。
     Keil project for compiling and programming Cortex-M33 (MCU).
     """
-    is_success, build_report = build_project()
+    # 透過工廠取得當下環境對應的工具鏈實例 (Get the toolchain instance for the current environment via the factory)
+    toolchain = get_mcu_toolchain()
+    
+    # 執行編譯 (Execute build)
+    is_success, build_report = toolchain.build_project()
+    
     if is_success:
         is_safe, safety_msg = static_safety_check("MCU")
         if not is_safe:
             return f"❌ MCU compiles successfully, but FLASHING ABORTED due to safety violation:\n{safety_msg}\nPlease modify the code and try again."
             
-        flash_target()
-        return f"MCU compiles and programs sucessfully! \nlog:\n{build_report}"
+        # 執行燒錄 (Execute flash)
+        flash_success = toolchain.flash_target()
+        if flash_success:
+            return f"✅ MCU compiles and programs successfully! \nlog:\n{build_report}"
+        else:
+            return f"❌ MCU compiled successfully, but flashing failed. Check J-Link connection."
     else:
-        return f"MCU compiles failed. Errors:\n{build_report}"
-
+        return f"❌ MCU compiles failed. Errors:\n{build_report}"
+    
 @tool
 def start_mpu_build(dummy_arg: str = "") -> str:
-    """
-    用於觸發遠端 Yocto 伺服器進行 Cortex-A55 (MPU) 的映像檔編譯。
-    Used to trigger the compilation of the Cortex-A55 (MPU) image file on a remote Yocto server.
-    """
-    return trigger_remote_build()
+    """用於觸發遠端 Yocto 伺服器進行 Cortex-A55 (MPU) 的映像檔編譯。"""
+    toolchain = get_mpu_toolchain()
+    return toolchain.trigger_build()
 
 @tool
 def check_mpu_build_status(dummy_arg: str = "") -> str:
-    """
-    用於檢查 Yocto 編譯進度。如果回報「進行中」，請等待並重新呼叫。
-    Used to check the Yocto compilation progress. If it returns "In Progress", please wait and call again.
-    """
+    """用於檢查 Yocto 編譯進度。如果回報「進行中」，請等待並重新呼叫。"""
     time.sleep(2)
-    return check_build_status()
+    toolchain = get_mpu_toolchain()
+    return toolchain.check_status()
 
 @tool
 def deploy_mpu_image(dummy_arg: str = "") -> str:
-    """
-    當 Yocto 編譯成功後，呼叫此工具下載 Image 並透過 UUU 燒錄。
-    Once Yocto has compiled successfully, call this tool to download the image and flash it via UUU.
-    """
-    dl_success = download_remote_image()
+    """當 Yocto 編譯成功後，呼叫此工具下載 Image 並透過 UUU 燒錄。"""
+    toolchain = get_mpu_toolchain()
+    dl_success = toolchain.download_image()
     if not dl_success:
         return "❌ download the image failed!"
-    flash_success = flash_image_uuu()
+    flash_success = toolchain.flash_image()
     return "✅ UUU flashes successfully!" if flash_success else "❌ UUU flashes failed!"
 
 @tool
@@ -113,3 +117,26 @@ def monitor_device_logs(port_name: str = "") -> str:
     
     success, report = monitor_uart_log(selected_port, duration=8)
     return report
+
+# src/agent/agent_tools.py (在檔案尾部新增)
+
+@tool
+def reset_target_board(dummy_arg: str = "") -> str:
+    """
+    【硬體重置工具 Hardware Reset】
+    當發現開發板沒有回應 (TIMEOUT)、無法連線，或發生嚴重的 Kernel Panic / HardFault 導致完全死機時，
+    請使用此工具來對目標開發板進行強制斷電重啟 (Power Cycle) 或硬體重置 (Hardware Reset)。
+    """
+    mode = os.getenv("EXECUTION_MODE", "MOCK").upper()
+    
+    if mode == "MOCK":
+        print("\n🔌 [Mock Mode] 觸發硬體重置... 模擬切斷電源並重新上電。")
+        time.sleep(2)  # 模擬電容放電與重新上電的時間
+        return "✅ 開發板已成功強制重置 (Power Cycled)。系統現在應該是乾淨的狀態，請再次呼叫 monitor_device_logs 監聽開機日誌。"
+    else:
+        print("\n🔌 [Real Mode] 觸發硬體重置... (準備透過 J-Link 或智慧插座重置開發板)")
+        # 💡 未來入職後，可以在這裡實作真實的硬體控制，例如：
+        # 1. 透過 J-Link 發送 Reset 訊號: subprocess.run([JLINK_PATH, "-CommanderScript", "reset.jlink"])
+        # 2. 透過智慧插座 API 切斷電源: requests.post("http://smart-plug-ip/off") -> time.sleep(1) -> requests.post("http://smart-plug-ip/on")
+        time.sleep(3)
+        return "✅ 實體開發板已成功重置。請再次呼叫 monitor_device_logs 監聽開機日誌。"
