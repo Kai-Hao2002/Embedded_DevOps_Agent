@@ -51,45 +51,45 @@ def execute_bash_command(command: str) -> str:
     except Exception as e:
         return f"❌ Error executing command: {e}"
     
+# src/tools/patch_tool.py
+
 @tool
-def apply_patch_tool(file_path: str, search_context: str, replace_content: str) -> str:
+def apply_patch_tool(file_path: str, start_line: int, end_line: int, replace_content: str) -> str:
     """
-    【程式碼修復工具】請精確提供檔案路徑、包含前後文的「搜尋區塊 (search_context)」，以及「替換後的完整區塊 (replace_content)」。
-    [Code Repair Tool] Please provide the file path, the "search_context" including the context, and the "replaced content".
+    【程式碼修復工具】請精確提供檔案路徑、要替換的起始行號 (start_line)、結束行號 (end_line)，以及「替換後的完整區塊 (replace_content)」。
+    如果只是要插入新程式碼而不刪除任何東西，請將 start_line 設為要插入的行號，end_line 設為 start_line - 1。
+    [Code Repair Tool] Please provide the file path, start_line, end_line, and the replace_content.
     """
-    print(f"\n🛠️ [Patch Tool] is attempting to repair the file: {file_path}")    
+    print(f"\n🛠️ [Patch Tool] is attempting to repair the file: {file_path} (Lines {start_line}-{end_line})")    
 
     if not os.path.exists(file_path):
         return (f"❌ Repair failed: file `{file_path}` not found on local machine.\n")
-    # 2. Read the original file content
-    with open(file_path, "r", encoding="utf-8") as f:
-        original_code = f.read()
-
-    # 將連續空白正規化，提高匹配率
-    def normalize_space(text):
-        return re.sub(r'\s+', '', text)
-
-    # 尋找匹配區塊
-    search_norm = normalize_space(search_context)
-    orig_norm = normalize_space(original_code)
-    
-    if search_norm not in orig_norm:
-        return (f"❌ 修復失敗：無法在原始檔案中找到相符的 `search_context`。\n"
-                f"🚨 [系統警告] 您提供的 search_context 必須與原始碼完全一致！\n"
-                f"請先使用 `read_file_tool` 確認檔案內容，再重新嘗試。")
         
-    # 執行 Python 標準庫的替換
-    # 若需高精度，建議讓 LLM 輸出標準 unified diff 格式並使用 patch 命令套用
-    new_code = original_code.replace(search_context, replace_content)
+    # 讀取原始檔案並保留換行符號
+    with open(file_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+        
+    original_code = "".join(lines)
+    total_lines = len(lines)
+
+    # 驗證行號合法性
+    if start_line < 1 or start_line > total_lines + 1 or end_line < start_line - 1 or end_line > total_lines:
+        return f"❌ Repair failed: Invalid line numbers. The file has {total_lines} lines. Please check your start_line and end_line."
+
+    # 確保替換的內容最後有換行符號
+    if replace_content and not replace_content.endswith('\n'):
+        replace_content += '\n'
+
+    # 進行行號替換
+    new_lines = lines[:start_line-1] + [replace_content] + lines[end_line:]
+    new_code = "".join(new_lines)
 
     # DTS 語法預檢驗 (Dry-Run)
     if file_path.endswith(".dts") or file_path.endswith(".dtsi"):
-        # 暫存測試檔案
         test_file = file_path + ".test"
         with open(test_file, "w", encoding="utf-8") as f:
             f.write(new_code)
         
-        # 呼叫 dtc 工具檢查語法 (若環境支援)
         try:
             result = subprocess.run(["dtc", "-I", "dts", "-O", "dtb", "-o", "/dev/null", test_file], 
                                     capture_output=True, text=True)
@@ -97,9 +97,10 @@ def apply_patch_tool(file_path: str, search_context: str, replace_content: str) 
             if result.returncode != 0:
                 return f"❌ Repair failed: The modified Device Tree contains a syntax error!\n{result.stderr}"
         except FileNotFoundError:
-            os.remove(test_file)
+            if os.path.exists(test_file):
+                os.remove(test_file)
             
-    # 儲存 patch 並寫回檔案
+    # 產生 Unified Diff 並寫入檔案
     diff = difflib.unified_diff(
         original_code.splitlines(keepends=True),
         new_code.splitlines(keepends=True),
@@ -107,10 +108,15 @@ def apply_patch_tool(file_path: str, search_context: str, replace_content: str) 
     )
     patch_content = "".join(diff)
 
+    # 如果沒有差異，代表可能替換錯誤或無須替換
+    if not patch_content:
+         return "⚠️ Warning: The replaced content is identical to the original code. No changes were made."
+
     patches_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "patches"))
     os.makedirs(patches_dir, exist_ok=True)
     safe_name = re.sub(r"[^a-zA-Z0-9_.-]+", "_", file_path).strip("_")
     patch_path = os.path.join(patches_dir, f"{int(time.time())}_{safe_name}.patch")
+    
     with open(patch_path, "w", encoding="utf-8") as f:
         f.write(patch_content)
     

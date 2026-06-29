@@ -38,6 +38,7 @@ class AgentState(TypedDict):
     functional_passed: bool
     expected_uart_regex: str
     crash_patterns: list[str]
+    repair_history: Annotated[list[str], operator.add]
 
 class RouteDecision(BaseModel):
     """

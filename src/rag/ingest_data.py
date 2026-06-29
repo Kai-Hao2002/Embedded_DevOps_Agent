@@ -5,23 +5,23 @@ import pickle
 import pdfplumber
 from langchain_core.documents import Document
 from langchain_community.document_loaders import PDFPlumberLoader, TextLoader, WebBaseLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter, Language
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 
 
 DOC_PATH = "./docs/processed"
+CODE_PATH = "./target_workspace"
 DB_PATH = "./chroma_db"
 
 # ==========================================
 # 🌐 網頁資源設定區 (Web Resources)
 # ==========================================
-WEB_URLS = [
-    "https://www.keil.com/support/man/docs/uv4cl/uv4cl_commandline.htm", # Keil MDK CLI
-    "https://kb.segger.com/J-Link_Commander",                            # J-Link Commander
-    "https://github.com/nxp-imx/mfgtools/blob/master/README.md"          # NXP UUU (Universal Update Utility)
-]
-
+WEB_URLS = {
+    "Keil_MDK_CLI": "https://www.keil.com/support/man/docs/uv4cl/uv4cl_commandline.htm", # Keil MDK CLI
+    "J-Link_Commander": "https://kb.segger.com/J-Link_Commander",                        # J-Link Commander
+    "NXP_UUU": "https://github.com/nxp-imx/mfgtools/blob/master/README.md"               # NXP UUU (Universal Update Utility)
+}
 
 def parse_pdf_with_markdown_tables(file_path):
     """
@@ -72,83 +72,130 @@ def parse_pdf_with_markdown_tables(file_path):
             # 封裝為 LangChain 認識的 Document 格式 / Wrap into LangChain Document format
             docs.append(Document(
                 page_content=content,
-                metadata={"source": os.path.basename(file_path), "page": i + 1}
+                metadata={"source": os.path.basename(file_path), "page": i + 1, "source_type": "pdf"}
             ))
     return docs
 
 def build_vector_database():
-    """讀取 PDF 與網頁內容，建立/覆蓋本地向量資料庫與 BM25 索引"""
+    """讀取多種文件並根據檔案類型進行智慧切塊 (Code-Aware Chunking)"""
     
-    # 1. 清除舊資料庫 (Clear old DB)
     if os.path.exists(DB_PATH):
         print(f"🗑️ Clearing old vector database at {DB_PATH}...")
         shutil.rmtree(DB_PATH)
 
-    docs = []
+    # 依據檔案類型分類收集
+    pdf_and_text_docs = []
+    c_cpp_docs = []
+    dts_docs = []
+    yocto_docs = []
 
-    # 2. 讀取本地 PDF 文件 (Load Local PDFs)
+    # 1. 讀取本地 PDF 與文件 (Load Local PDFs & Text)
     if os.path.exists(DOC_PATH):
         print("📄 Loading local documents...")
         for filename in os.listdir(DOC_PATH):
             file_path = os.path.join(DOC_PATH, filename)
             
-            # If it's PDF, using PDFPlumberLoader
             if filename.lower().endswith(".pdf"):
                 print(f"   📖 Reading PDF: {filename}")
-                parsed_docs = parse_pdf_with_markdown_tables(file_path)
-                docs.extend(parsed_docs)
+                pdf_and_text_docs.extend(parse_pdf_with_markdown_tables(file_path))
                 
-            # If it's Markdown or TXT, using TextLoader
             elif filename.lower().endswith(".md") or filename.lower().endswith(".txt"):
                 print(f"   📝 Reading Text/Markdown: {filename}")
                 loader = TextLoader(file_path, encoding='utf-8')
-                docs.extend(loader.load())
+                loaded_docs = loader.load()
+                # 🟢 增加 Metadata
+                for doc in loaded_docs: doc.metadata["source_type"] = "markdown"
+                pdf_and_text_docs.extend(loaded_docs)
                 
-            # Skip unknow format
-            else:
-                print(f"   ⏩ Skipping unsupported file: {filename}")
-    else:
-        print(f"⚠️ Warning: Folder {DOC_PATH} not found.")
 
-    # 3. 讀取線上網頁文件 (Load Web Documents)
-    if WEB_URLS:
-        print("\n🌐 Loading Web documents via WebBaseLoader...")
+    # 2. 掃描原始碼資料夾 (Load Source Code for RAG)
+    # 讓 RAG 也能搜尋 target_workspace 裡面的 C code 和 DTS
+    if os.path.exists(CODE_PATH):
+        print("\n💻 Scanning source code and device trees...")
+        for root, _, files in os.walk(CODE_PATH):
+            for filename in files:
+                file_path = os.path.join(root, filename)
+                
+                if filename.endswith(".c") or filename.endswith(".h"):
+                    loader = TextLoader(file_path, encoding='utf-8')
+                    loaded_docs = loader.load()
+                    for doc in loaded_docs: doc.metadata["source_type"] = "c_code"
+                    c_cpp_docs.extend(loaded_docs)
+                    
+                elif filename.endswith(".dts") or filename.endswith(".dtsi"):
+                    loader = TextLoader(file_path, encoding='utf-8')
+                    loaded_docs = loader.load()
+                    for doc in loaded_docs: doc.metadata["source_type"] = "dts"
+                    dts_docs.extend(loaded_docs)
+                elif filename.endswith(".bb") or filename.endswith(".bbappend") or filename.endswith(".conf"):
+                    loader = TextLoader(file_path, encoding='utf-8')
+                    loaded_docs = loader.load()
+                    for doc in loaded_docs: doc.metadata["source_type"] = "yocto_recipe"
+                    yocto_docs.extend(loaded_docs)
+
+    print("\n🌐 Loading Web documents via WebBaseLoader...")
+    for source_name, url in WEB_URLS.items():
         try:
-            # WebBaseLoader Supports direct URL List inputs
-            web_loader = WebBaseLoader(WEB_URLS)
+            web_loader = WebBaseLoader([url])
             web_docs = web_loader.load()
-            
-            # Merge webpage content with PDF content
-            docs.extend(web_docs)
-            print(f"   ✅ Successfully loaded {len(WEB_URLS)} web pages.")
+            for doc in web_docs: 
+                # [優化] 覆寫 Metadata 的 source 為明確名稱 / [Optimization] Override Metadata source with explicit name
+                doc.metadata["source"] = source_name 
+                doc.metadata["source_type"] = "web"
+            pdf_and_text_docs.extend(web_docs)
+            print(f"   ✅ Successfully loaded: {source_name}")
         except Exception as e:
-            print(f"   ❌ Error loading web pages: {e}")
-            print("   💡 Note: Please confirm that you have executed `pip install beautifulsoup4`.")
+            print(f"   ❌ Error loading web page {source_name}: {e}")
 
-    # Check if any data has been captured.
-    if not docs:
-        print("\n⚠️ No documents found from either PDFs or Web. Exiting.")
-        return
-        
-    print(f"\n✅ Total document chunks/pages loaded: {len(docs)}")
+    print("\n✂️ Splitting text with content-aware strategies...")
+    all_splits = []
 
-    # 4. 文本切塊 (Text Chunking)
-    # The chunking here will apply to both the plain text parsed from PDF and HTML.
-    print("✂️ Splitting text...")
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=3500, chunk_overlap=500)
-    splits = text_splitter.split_documents(docs)
+    # 策略 A：純文本與 PDF (使用標準字元切塊)
+    std_splitter = RecursiveCharacterTextSplitter(chunk_size=3500, chunk_overlap=500)
+    all_splits.extend(std_splitter.split_documents(pdf_and_text_docs))
+    
+    # 策略 B：C/C++ 原始碼 (基於 AST 語法樹的切塊，保持 Function 完整)
+    if c_cpp_docs:
+        print(f"   -> Splitting {len(c_cpp_docs)} C/C++ files using AST rules...")
+        c_splitter = RecursiveCharacterTextSplitter.from_language(
+            language=Language.C, chunk_size=1500, chunk_overlap=200
+        )
+        all_splits.extend(c_splitter.split_documents(c_cpp_docs))
+
+    # 策略 C：Device Tree (DTS) (以節點結尾 '};' 為主要分隔符，保持 Node 完整)
+    if dts_docs:
+        print(f"   -> Splitting {len(dts_docs)} DTS files using Node rules...")
+        dts_splitter = RecursiveCharacterTextSplitter(
+            separators=["\n};", "{\n", "\n\n", "\n"], # 優先在 Node 結尾切斷
+            chunk_size=1200, 
+            chunk_overlap=150
+        )
+        all_splits.extend(dts_splitter.split_documents(dts_docs))
+    
+    # 策略 D：Yocto Recipe / [NEW] Strategy D: Yocto Recipe
+    if yocto_docs:
+        print(f"   -> Splitting {len(yocto_docs)} Yocto files using recipe rules...")
+        yocto_splitter = RecursiveCharacterTextSplitter(
+            # 優先在 Yocto 任務函式 (如 do_compile) 的邊界切割 / Prioritize cutting at Yocto task boundaries
+            separators=["\ndo_", "\n}", "\n\n", "\n"], 
+            chunk_size=1000,
+            chunk_overlap=150
+        )
+        all_splits.extend(yocto_splitter.split_documents(yocto_docs))
+
+    print(f"\n✅ Total document chunks generated: {len(all_splits)}")
 
     # 5. 建立與儲存資料庫 (Embedding and Storing)
     print("🧠 Creating embeddings and saving to ChromaDB...")
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    Chroma.from_documents(documents=splits, embedding=embeddings, persist_directory=DB_PATH)
+    Chroma.from_documents(documents=all_splits, embedding=embeddings, persist_directory=DB_PATH)
     
     # 6. 將 splits 存成 pickle 檔案供 BM25 讀取 (Save for Ensemble Retriever)
     print("📦 Saving documents for BM25 Keyword Search...")
     with open("splits.pkl", "wb") as f:
-        pickle.dump(splits, f)
+        pickle.dump(all_splits, f)
         
-    print("\n🎉 Vector database & BM25 index built successfully! (PDF + Web)")
+    print("\n🎉 Hybrid Vector database & BM25 index built successfully!")
 
 if __name__ == "__main__":
     build_vector_database()

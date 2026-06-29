@@ -171,6 +171,8 @@ def run_experiments(mode="PROPOSED_MAS"):
 
     for bug in bugs:
         print(f"\n🧪 測試案例 (Testing Case): {bug['bug_id']} - {bug['description']}")
+
+        os.environ["CURRENT_TEST_BUG_ID"] = bug["bug_id"]
         
         # 1. 備份與破壞 (Backup & Inject)
         if not backup_clean_code(bug["target_file"]):

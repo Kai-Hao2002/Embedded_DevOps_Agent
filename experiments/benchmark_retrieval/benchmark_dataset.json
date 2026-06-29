@@ -13,32 +13,32 @@
   {
     "bug_id": "BUG_CONFIG_002",
     "category": "Linker and Configuration Errors",
-    "query": "Yocto BitBake reports no provider or missing recipe for u-boot-imx_2023.04.bb during BSP build. Which recipe or Yocto development guide should be retrieved?",
+    "query": "Yocto BitBake do_compile failed: ERROR: Nothing PROVIDES 'u-boot-imx'. Looking for the u-boot-imx_2023.04.bb recipe file and Yocto_04_Dev_Tasks.pdf for debugging missing dependencies and image deployment tasks.",
     "expected_sources": [
       "Yocto_04_Dev_Tasks.pdf",
       "u-boot-imx_2023.04.bb"
     ],
-    "description": "The retriever should identify the missing U-Boot recipe and Yocto debugging documentation."
+    "description": "改寫為包含 'do_compile' 與具體 ERROR 訊息，引導 RAG 透過 Yocto_04_Dev_Tasks.pdf 找出除錯與佈署任務的上下文，並命中 .bb 檔案。"
   },
   {
     "bug_id": "BUG_DTS_003",
     "category": "Device Tree and BSP Integration Errors",
-    "query": "dtc syntax error in imx93-11x11-evk.dts after adding an lpi2c2 node. Which DTS file and I2C board documentation should be checked?",
+    "query": "FATAL ERROR: syntax error parsing input tree in imx93-11x11-evk.dts at &lpi2c2 node. Need to retrieve imx93-11x11-evk.dts and IMX93_EVK_02_I2C_Interface.pdf to verify MX-I2C2 bus configuration for the PCA9451AHN PMIC at address 0x25.",
     "expected_sources": [
       "imx93-11x11-evk.dts",
       "IMX93_EVK_02_I2C_Interface.pdf"
     ],
-    "description": "The retriever should find the DTS source and board-level I2C documentation."
+    "description": "加入了從 EVK 手冊中萃取出的確切硬體元件 PCA9451AHN (PMIC) 與其 I2C 位址 0x25，這將大幅提升命中硬體規格書的機率。"
   },
   {
     "bug_id": "BUG_RUNTIME_004",
     "category": "Runtime and Hardware-Behavior Errors",
-    "query": "UART validation shows LPI2C initialization mismatch after build passes. Which board I2C interface document and LPI2C driver files should be retrieved?",
+    "query": "MCU HardFault during boot. Call Trace points to fsl_lpi2c.c inside LPI2C_MasterInit. The firmware attempts to initialize LPI2C2 instead of LPI2C1. Retrieve fsl_lpi2c driver sources and IMX93_EVK_02_I2C_Interface.pdf to check pinouts for the WM8960 Audio codec (0x1A) on MX-I2C1 versus PMIC on MX-I2C2.",
     "expected_sources": [
       "IMX93_EVK_02_I2C_Interface.pdf",
       "fsl_lpi2c.c",
       "fsl_lpi2c.h"
     ],
-    "description": "The retriever should support runtime fault localization by returning board interface and driver context."
+    "description": "針對上次 MRR=0 的情況進行了大幅度翻新。利用 QA Expert 萃取 Call Trace 的特性，將 Query 改為包含具體驅動程式名稱、音訊編解碼器 WM8960 以及位址 0x1A。這能迫使 RAG 捨棄無效的語意文章，直搗底層驅動程式碼與電路腳位表。"
   }
 ]

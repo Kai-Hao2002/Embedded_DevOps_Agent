@@ -40,6 +40,7 @@ src/*.c
 
 #experiments
 experiments/fault_injection/backup_clean_code
+experiments/real_logs/*.log
 
 #target_workspace
 target_workspace/

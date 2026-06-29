@@ -47,9 +47,16 @@ def extract_critical_yocto_logs(log_content: str, context_lines: int = 50) -> st
     """
     lines = log_content.splitlines()
     critical_indices = set()
+    detailed_log_path = None
     
     # 尋找關鍵字 (支援 ERROR:, WARNING:, FATAL:, failed)
     for i, line in enumerate(lines):
+        # 擷取 Yocto 提示的詳細日誌路徑 (Capture specific task log path)
+        if "Logfile of failure stored in:" in line:
+            match = re.search(r'Logfile of failure stored in:\s*(/[^\s]+)', line)
+            if match:
+                detailed_log_path = match.group(1)
+
         if re.search(r'^(ERROR|WARNING|FATAL):', line, re.IGNORECASE) or "failed" in line.lower():
             # 抓取該行前後文 (例如前後 50 行)
             start = max(0, i - context_lines)
@@ -72,6 +79,14 @@ def extract_critical_yocto_logs(log_content: str, context_lines: int = 50) -> st
             
     # 如果過濾後依然很長，加強截斷以保護 Token
     truncated_log = "\n...\n".join(filtered_lines)
+    if detailed_log_path:
+        header = (
+            f"🚨 [System Info] Yocto build failed. The detailed task log is stored at:\n"
+            f"   >>> {detailed_log_path} <<<\n"
+            f"💡 Knowledge Expert MUST use `execute_bash_command` (e.g., `cat {detailed_log_path}`) "
+            f"to read this specific file for the actual root cause!\n\n"
+        )
+        truncated_log = header + truncated_log
     if len(truncated_log) > 10000:
         return truncated_log[:10000] + "\n... [Log Truncated due to size limits] ..."
     return truncated_log
@@ -106,6 +121,23 @@ def check_build_status():
     if EXECUTION_MODE == "MOCK":
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
+        # Attempt to load the real Yocto error log (if it exists)
+        bug_id = os.getenv("CURRENT_TEST_BUG_ID", "DEFAULT")
+        real_log_path = os.path.join(project_root, "experiments", "real_logs", f"{bug_id}_yocto.log")
+        
+        if os.path.exists(real_log_path):
+            with open(real_log_path, "r", encoding="utf-8", errors="ignore") as f:
+                raw_log_output = f.read()
+            
+            # 判斷是否為成功的 Log
+            if "Build successful" in raw_log_output or "Tasks summary: attempted" in raw_log_output and "failed: 0" in raw_log_output:
+                return "✅ Compilation successful! Image generated.\n(Please proceed with the deployment steps)"
+            else:
+                # 使用截斷器過濾真實的萬行 Log
+                smart_log = extract_critical_yocto_logs(raw_log_output, context_lines=40)
+                return f"❌ Compilation failed! Filtered Critical Logs:\n{smart_log}"
+
+        # Hardcoded Mock 邏輯 (Fallback / 作為後備方案)
         uboot_recipe = os.path.join(project_root, "target_workspace", "mpu_linux_bsp", "recipes-bsp", "u-boot", "u-boot-imx_2023.04.bb")
         if not os.path.exists(uboot_recipe):
             return (

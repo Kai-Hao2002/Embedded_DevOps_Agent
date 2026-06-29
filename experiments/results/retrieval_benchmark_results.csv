@@ -1,0 +1,5 @@
+﻿Bug ID,Category,MRR,Recall@5,Top-5 Accuracy,Expected Sources
+BUG_COMPILE_001,Syntax and Compile Errors,0.5,0.3333,1.0,"IMX93_12_LPI2C.pdf, fsl_lpi2c.c, fsl_lpi2c.h"
+BUG_CONFIG_002,Linker and Configuration Errors,0.25,0.5,1.0,"Yocto_04_Dev_Tasks.pdf, u-boot-imx_2023.04.bb"
+BUG_DTS_003,Device Tree and BSP Integration Errors,0.3333,0.5,1.0,"imx93-11x11-evk.dts, IMX93_EVK_02_I2C_Interface.pdf"
+BUG_RUNTIME_004,Runtime and Hardware-Behavior Errors,0.3333,0.3333,1.0,"IMX93_EVK_02_I2C_Interface.pdf, fsl_lpi2c.c, fsl_lpi2c.h"

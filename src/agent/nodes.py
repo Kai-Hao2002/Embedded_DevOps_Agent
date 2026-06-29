@@ -25,7 +25,10 @@ logger = logging.getLogger(__name__)
 
 # 初始化全域 LLM 與 Agent
 llm = get_llm(provider="gemini")
-knowledge_agent = create_react_agent(llm, tools=[query_nxp_knowledge_base]) # 只保留檢索工具
+knowledge_agent = create_react_agent(
+    llm, 
+    tools=[query_nxp_knowledge_base, read_file_tool, execute_bash_command]
+)
 patch_agent = create_react_agent(llm, tools=[read_file_tool, apply_patch_tool, execute_bash_command])
 devops_agent = create_react_agent(llm, tools=[compile_and_flash_mcu, start_mpu_build, check_mpu_build_status, deploy_mpu_image])
 qa_agent = create_react_agent(llm, tools=[monitor_device_logs])
@@ -148,11 +151,19 @@ def closed_loop_single_agent_node(state: AgentState):
 
 def knowledge_node(state: AgentState):
     start_think = time.time()
-    sys_msg = SystemMessage(content="""You are the Knowledge Expert for an embedded BSP closed-loop repair system.
+    history_logs = state.get("repair_history", [])
+    history_text = "\n".join(history_logs) if history_logs else "No previous attempts yet."
+    sys_msg = SystemMessage(content=f"""You are the Knowledge Expert for an embedded BSP closed-loop repair system.
     Your responsibilities correspond to AnalyzeFailure and RetrieveKnowledge.
-    1. Use `query_nxp_knowledge_base` to retrieve BSP manuals, source-code context, build documentation, or hardware notes.
-    2. Analyze the root cause based on the error log and retrieved documents.
-    3. Summarize your findings and explicitly state what needs to be fixed so the Patch Expert can take over. Do NOT attempt to read or modify files yourself.
+    
+    🚨 [CRITICAL: PREVIOUS REPAIR ATTEMPTS MEMORY]
+    The following attempts have ALREADY BEEN TRIED and FAILED. Do NOT suggest these identical fixes again:
+    {history_text}
+    
+    1. If the error log mentions "Logfile of failure stored in: <path>", you MUST first use `execute_bash_command` (e.g., `cat <path>`) or `read_file_tool` to read that exact file.
+    2. Use `query_nxp_knowledge_base` to retrieve BSP context.
+    3. Analyze the root cause based on the error log, Call Trace, and retrieved documents.
+    4. Propose a NEW fix strategy that differs from the failed attempts.
     """)
     baton = HumanMessage(content="[System] Analyze the latest build/runtime evidence, retrieve relevant BSP context, and summarize findings for the Patch Expert.")
     inputs = [sys_msg] + state["messages"] + [baton]
@@ -170,22 +181,37 @@ def knowledge_node(state: AgentState):
 
 def patch_node(state: AgentState):
     start_think = time.time()
-    sys_msg = SystemMessage(content="""You are the Patch Expert for an embedded BSP closed-loop repair system.
+    history_logs = state.get("repair_history", [])
+    history_text = "\n".join(history_logs) if history_logs else "No previous attempts yet."
+
+    sys_msg = SystemMessage(content=f"""You are the Patch Expert for an embedded BSP closed-loop repair system.
+    
+    🚨 [CRITICAL: PREVIOUS REPAIR ATTEMPTS MEMORY]
+    Review the past failed attempts to avoid repeating the exact same code replacements:
+    {history_text}
+    
     1. Read the analysis from Knowledge Expert.
-    2. For CODE edits: Use `read_file_tool` then `apply_patch_tool`.
-    3. For MISSING/RENAMED files: Use `execute_bash_command` to search for backups (e.g., `find target_workspace -name "*.bak"`) and restore them (e.g., `mv <source> <dest>`).
-    4. The project root is typically `target_workspace/`. If you don't know the exact path, use `find` to search for it before applying patches or moving files!
-    5. Confirm success and stop.
+    2. For CODE edits: You MUST first use `read_file_tool` to view the file's content and its line numbers.
+    3. Use `apply_patch_tool` by providing the exact `start_line` and `end_line` you wish to replace. Ensure your code is logically different from past failures.
+    4. Confirm success and stop.
     """)
     baton = HumanMessage(content="[System] It is the Patch Expert's turn. Please read the target file and apply the necessary fix based on the previous analysis.")
     inputs = [sys_msg] + state["messages"] + [baton]
     result = patch_agent.invoke({"messages": inputs})
     think_time = time.time() - start_think
     
+    new_messages = result["messages"][len(inputs):]
+    
+    # 將這次 Patch Expert 的最終總結擷取下來，存入記憶體中
+    ai_response = extract_text(new_messages[-1].content)
+    # 取前 150 字作為精簡摘要，避免 Context Window 爆炸
+    summary_log = f"- Iteration {state.get('iteration_count', 1)}: Applied patch strategy -> {ai_response[:150]}..."
+    
     return {
-        "messages": result["messages"][len(inputs):],
+        "messages": new_messages,
         "llm_thinking_time": state.get("llm_thinking_time", 0) + think_time,
         "current_stage": "ApplyPatch",
+        "repair_history": [summary_log] 
     }
 
 def devops_node(state: AgentState):
@@ -213,8 +239,15 @@ def devops_node(state: AgentState):
 def qa_node(state: AgentState):
     start_think = time.time()
     sys_msg = SystemMessage(content="""You are the QA Expert for the ObserveRuntime stage.
-    Monitor UART or mock UART logs, report whether expected success signatures appear, and flag crash patterns such as Kernel Panic, HardFault, timeout, or peripheral initialization failure.""")
+    Monitor UART or mock UART logs, report whether expected success signatures appear, and flag crash patterns such as Kernel Panic, HardFault, timeout, or peripheral initialization failure.
     
+    🚨 CRITICAL EXTRACTION RULE:
+    If a Kernel Panic, HardFault, or Exception is detected, you MUST explicitly extract the following from the log and include them in your final report:
+    - Call Trace (Call stack function names)
+    - PC (Program Counter) address / LR (Link Register)
+    - Fault Registers (e.g., CFSR, BFAR)
+    The Knowledge Expert relies on these exact memory addresses and function symbols to perform accurate RAG retrieval!""")
+
     baton = HumanMessage(content="[System] QA Expert, please monitor the UART logs and verify if the system is operating normally without crashes.")
     inputs = [sys_msg] + state["messages"] + [baton]
     result = qa_agent.invoke({"messages": inputs})

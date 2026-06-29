@@ -72,7 +72,8 @@ def main():
                 "build_passed": False,
                 "functional_passed": False,
                 "expected_uart_regex": "",
-                "crash_patterns": ["Kernel panic", "HardFault", "Segmentation fault"]
+                "crash_patterns": ["Kernel panic", "HardFault", "Segmentation fault"],
+                "repair_history": []
             }
 
             for output in mas_app.stream(initial_state, {"recursion_limit": 100}):
